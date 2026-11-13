@@ -53,6 +53,9 @@ class CallService : Service() {
         }
 
         @JvmStatic
+        fun isMicrophoneEnabled(): Boolean = current?.microphoneEnabled ?: false
+
+        @JvmStatic
         fun getAudioDevices(): List<Map<String, Any?>>? = current?.audioDevices()
 
         @JvmStatic

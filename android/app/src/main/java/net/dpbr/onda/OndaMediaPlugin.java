@@ -123,6 +123,11 @@ public class OndaMediaPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void getMic(PluginCall call) {
+        call.resolve(new JSObject().put("enabled", CallService.isMicrophoneEnabled()));
+    }
+
+    @PluginMethod
     public void setMic(PluginCall call) {
         Boolean enabled = call.getBoolean("enabled", true);
         CallService.setMicrophone(Boolean.TRUE.equals(enabled));
