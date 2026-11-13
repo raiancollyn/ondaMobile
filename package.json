@@ -1,0 +1,19 @@
+﻿{
+  "name": "onda-mobile",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Aplicativo Android do Onda",
+  "scripts": {
+    "sync": "cap sync android",
+    "build:debug": "cap sync android && cd android && gradlew.bat assembleDebug",
+    "install:debug": "adb install -r android/app/build/outputs/apk/debug/app-debug.apk",
+    "logcat": "adb logcat -s OndaBridge"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.6.2",
+    "@capacitor/core": "^8.6.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.6.2"
+  }
+}

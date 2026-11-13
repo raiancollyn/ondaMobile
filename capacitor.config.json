@@ -1,0 +1,22 @@
+﻿{
+  "appId": "net.dpbr.onda",
+  "appName": "Onda",
+  "webDir": "www",
+  "server": {
+    "url": "https://onda.dpbr.net",
+    "cleartext": false,
+    "allowNavigation": [
+      "onda.dpbr.net",
+      "*.dpbr.net"
+    ]
+  },
+  "android": {
+    "allowMixedContent": false
+  },
+  "plugins": {
+    "SystemBars": {
+      "insetsHandling": "disable",
+      "style": "DARK"
+    }
+  }
+}
