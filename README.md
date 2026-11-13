@@ -1,4 +1,4 @@
-﻿# Onda Mobile
+# Onda Mobile
 
 Aplicativo Android do Onda, construído com Capacitor e uma ponte nativa inicial
 para a futura camada de mídia.
@@ -90,3 +90,17 @@ android/        projeto Android nativo
 www/            fallback web local
 capacitor.config.json
 ```
+
+## Publicações
+
+O workflow `.github/workflows/android.yml` compila o APK debug em cada push para
+`main` e publica automaticamente uma release quando uma tag `v*` é enviada.
+
+```powershell
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+O APK publicado é **debug-signed**, adequado para testes e instalação via APK.
+Para a Play Store será necessário configurar um keystore de release nos secrets
+do GitHub e um build `assembleRelease` assinado.
