@@ -29,6 +29,8 @@ public class MainActivity extends BridgeActivity {
     private String pendingCallRoomId;
     private String pendingCallGuestId;
     private String pendingCallPresenceUrl;
+    private String pendingCallGuestName;
+    private int pendingCallAvatarTone;
     private View statusBarScrim;
     private View navigationBarScrim;
 
@@ -65,11 +67,25 @@ public class MainActivity extends BridgeActivity {
         String guestId,
         String presenceUrl
     ) {
+        startCallWithPermissions(url, token, roomId, guestId, presenceUrl, null, 0);
+    }
+
+    public void startCallWithPermissions(
+        String url,
+        String token,
+        String roomId,
+        String guestId,
+        String presenceUrl,
+        String guestName,
+        int avatarTone
+    ) {
         pendingCallUrl = url;
         pendingCallToken = token;
         pendingCallRoomId = roomId;
         pendingCallGuestId = guestId;
         pendingCallPresenceUrl = presenceUrl;
+        pendingCallGuestName = guestName;
+        pendingCallAvatarTone = avatarTone;
 
         String[] needed = {
             Manifest.permission.RECORD_AUDIO,
@@ -110,6 +126,10 @@ public class MainActivity extends BridgeActivity {
         if (pendingCallPresenceUrl != null && !pendingCallPresenceUrl.isEmpty()) {
             callIntent.putExtra(CallService.EXTRA_PRESENCE_URL, pendingCallPresenceUrl);
         }
+        if (pendingCallGuestName != null && !pendingCallGuestName.isEmpty()) {
+            callIntent.putExtra(CallService.EXTRA_GUEST_NAME, pendingCallGuestName);
+        }
+        callIntent.putExtra(CallService.EXTRA_AVATAR_TONE, pendingCallAvatarTone);
         ContextCompat.startForegroundService(this, callIntent);
     }
 

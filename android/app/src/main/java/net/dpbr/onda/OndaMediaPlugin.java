@@ -1,6 +1,8 @@
 package net.dpbr.onda;
 
+import android.content.Context;
 import android.content.Intent;
+import android.media.AudioManager;
 import androidx.core.content.ContextCompat;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
@@ -38,7 +40,9 @@ public class OndaMediaPlugin extends Plugin {
                 token,
                 call.getString("roomId"),
                 call.getString("guestId"),
-                call.getString("presenceUrl")
+                call.getString("presenceUrl"),
+                call.getString("guestName"),
+                call.getInt("avatarTone", 0)
             );
         } else {
             Intent intent = new Intent(getContext(), CallService.class)
@@ -47,7 +51,9 @@ public class OndaMediaPlugin extends Plugin {
                 .putExtra(CallService.EXTRA_TOKEN, token)
                 .putExtra(CallService.EXTRA_ROOM_ID, call.getString("roomId"))
                 .putExtra(CallService.EXTRA_GUEST_ID, call.getString("guestId"))
-                .putExtra(CallService.EXTRA_PRESENCE_URL, call.getString("presenceUrl"));
+                .putExtra(CallService.EXTRA_PRESENCE_URL, call.getString("presenceUrl"))
+                .putExtra(CallService.EXTRA_GUEST_NAME, call.getString("guestName"))
+                .putExtra(CallService.EXTRA_AVATAR_TONE, call.getInt("avatarTone", 0));
             ContextCompat.startForegroundService(getContext(), intent);
         }
         call.resolve(new JSObject().put("started", true));
@@ -94,6 +100,26 @@ public class OndaMediaPlugin extends Plugin {
             return;
         }
         call.resolve(new JSObject().put("selected", true));
+    }
+
+    @PluginMethod
+    public void getOutputVolume(PluginCall call) {
+        AudioManager audio = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
+        int max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+        int current = audio.getStreamVolume(AudioManager.STREAM_MUSIC);
+        int percent = max > 0 ? Math.round(current * 100f / max) : 0;
+        call.resolve(new JSObject().put("percent", percent));
+    }
+
+    @PluginMethod
+    public void setOutputVolume(PluginCall call) {
+        Integer percent = call.getInt("percent", 100);
+        int clamped = Math.max(0, Math.min(100, percent == null ? 100 : percent));
+        AudioManager audio = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
+        int max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+        int index = Math.round(max * (clamped / 100f));
+        audio.setStreamVolume(AudioManager.STREAM_MUSIC, index, 0);
+        call.resolve(new JSObject().put("percent", clamped));
     }
 
     @PluginMethod

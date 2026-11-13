@@ -38,6 +38,8 @@ class CallService : Service() {
         const val EXTRA_ROOM_ID = "net.dpbr.onda.extra.ROOM_ID"
         const val EXTRA_GUEST_ID = "net.dpbr.onda.extra.GUEST_ID"
         const val EXTRA_PRESENCE_URL = "net.dpbr.onda.extra.PRESENCE_URL"
+        const val EXTRA_GUEST_NAME = "net.dpbr.onda.extra.GUEST_NAME"
+        const val EXTRA_AVATAR_TONE = "net.dpbr.onda.extra.AVATAR_TONE"
         private const val CHANNEL_ID = "onda_call"
         private const val NOTIFICATION_ID = 1001
 
@@ -63,6 +65,8 @@ class CallService : Service() {
     private var statusText = "Chamada de voz em andamento"
     private var roomId: String? = null
     private var guestId: String? = null
+    private var guestName: String? = null
+    private var guestAvatarTone = 0
     private var presenceUrl: String? = null
     private var heartbeatJob: Job? = null
     private var liveKitUrl: String? = null
@@ -104,6 +108,8 @@ class CallService : Service() {
 
         roomId = intent?.getStringExtra(EXTRA_ROOM_ID)
         guestId = intent?.getStringExtra(EXTRA_GUEST_ID)
+        guestName = intent?.getStringExtra(EXTRA_GUEST_NAME)
+        guestAvatarTone = intent?.getIntExtra(EXTRA_AVATAR_TONE, 0) ?: 0
         presenceUrl = intent?.getStringExtra(EXTRA_PRESENCE_URL)
 
         val url = intent?.getStringExtra(EXTRA_URL)
@@ -305,7 +311,7 @@ class CallService : Service() {
         heartbeatJob?.cancel()
         heartbeatJob = scope.launch {
             while (isActive) {
-                postPresence("heartbeat")
+                postPresence("native")
                 delay(30_000)
             }
         }
@@ -329,7 +335,8 @@ class CallService : Service() {
                     doOutput = true
                     setRequestProperty("Content-Type", "application/json")
                 }
-                val body = """{"roomId":"$room","guestId":"$guest"}"""
+                val safeName = (guestName ?: "Convidado").replace("\\", "\\\\").replace("\"", "\\\"")
+                val body = """{"roomId":"$room","guestId":"$guest","name":"$safeName","avatarTone":$guestAvatarTone}"""
                 connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
                 val code = connection.responseCode
                 if (code !in 200..299) {
