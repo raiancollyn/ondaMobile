@@ -199,6 +199,18 @@ public class MainActivity extends BridgeActivity {
         }, 8000);
     }
 
+    @Override
+    public void onBackPressed() {
+        if (getBridge() != null &&
+            getBridge().getWebView() != null &&
+            getBridge().getWebView().canGoBack()) {
+            getBridge().getWebView().goBack();
+            return;
+        }
+
+        super.onBackPressed();
+    }
+
     private void applySafeAreaInsets() {
         if (getBridge() == null || getBridge().getWebView() == null) {
             return;
