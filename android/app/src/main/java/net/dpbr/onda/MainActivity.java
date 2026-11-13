@@ -1,17 +1,77 @@
 package net.dpbr.onda;
 
+import android.Manifest;
+import android.content.Intent;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.WindowInsets;
+import android.widget.Toast;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
+    private static final int CALL_PERMISSIONS_REQUEST = 42;
     private boolean bridgeProbeScheduled;
+    private boolean startCallWhenGranted;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(OndaMediaPlugin.class);
         super.onCreate(savedInstanceState);
+
+        boolean debuggable = (getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+        if (debuggable && getIntent().getBooleanExtra("onda_test_call", false)) {
+            startCallWithPermissions();
+        }
+    }
+
+    public void startCallWithPermissions() {
+        String[] needed = {
+            Manifest.permission.RECORD_AUDIO,
+            Manifest.permission.POST_NOTIFICATIONS
+        };
+        boolean missing = false;
+        for (String permission : needed) {
+            if (ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED) {
+                missing = true;
+                break;
+            }
+        }
+
+        if (missing) {
+            startCallWhenGranted = true;
+            ActivityCompat.requestPermissions(this, needed, CALL_PERMISSIONS_REQUEST);
+            return;
+        }
+
+        startCallService();
+    }
+
+    private void startCallService() {
+        Intent callIntent = new Intent(this, CallService.class)
+            .setAction(CallService.ACTION_START);
+        ContextCompat.startForegroundService(this, callIntent);
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode != CALL_PERMISSIONS_REQUEST || !startCallWhenGranted) {
+            return;
+        }
+
+        startCallWhenGranted = false;
+        for (int result : grantResults) {
+            if (result != PackageManager.PERMISSION_GRANTED) {
+                Toast.makeText(this, "Permita microfone e notificações para a chamada.", Toast.LENGTH_LONG).show();
+                return;
+            }
+        }
+
+        startCallService();
     }
 
     @Override

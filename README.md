@@ -7,10 +7,14 @@ para a futura camada de mídia.
 
 - projeto Capacitor Android;
 - WebView carregando `https://onda.dpbr.net`;
-- plugin nativo `OndaMedia` com o método `ping`;
+- plugin nativo `OndaMedia` com ponte para o serviço de chamada;
 - teste automático da ponte JavaScript ↔ Kotlin no `logcat`;
 - APK debug instalável;
-- área segura do Android aplicada ao conteúdo da WebView.
+- área segura do Android aplicada ao conteúdo da WebView;
+- `CallService` em primeiro plano, com notificação persistente e ação
+  **Encerrar**;
+- permissões de microfone, notificação e foreground service;
+- plugin `OndaMedia` com `ping`, `startCallService` e `stopCallService`.
 
 Testado no aparelho:
 
@@ -24,15 +28,19 @@ Resultado da ponte nativa:
 
 ```text
 OndaBridge: "{\"ok\":true,\"platform\":\"android\",\"version\":\"0.0.1\"}"
+OndaCall: "Foreground call service started."
 ```
+
+O serviço ficou ativo com o app em segundo plano e com a notificação
+`Chamada de voz em andamento`.
 
 Ainda não implementado:
 
-- chamadas nativas LiveKit;
-- voz em segundo plano;
+- conexão nativa ao LiveKit;
+- publicação de microfone;
 - câmera;
 - compartilhamento de tela;
-- notificações de chamada.
+- integração da chamada nativa com a UI da sala.
 
 ## Requisitos
 
