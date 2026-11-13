@@ -33,6 +33,7 @@ class CallService : Service() {
     companion object {
         const val ACTION_START = "net.dpbr.onda.action.START_CALL"
         const val ACTION_STOP = "net.dpbr.onda.action.STOP_CALL"
+        const val ACTION_TOGGLE_MIC = "net.dpbr.onda.action.TOGGLE_MIC"
         const val EXTRA_URL = "net.dpbr.onda.extra.LIVEKIT_URL"
         const val EXTRA_TOKEN = "net.dpbr.onda.extra.LIVEKIT_TOKEN"
         const val EXTRA_ROOM_ID = "net.dpbr.onda.extra.ROOM_ID"
@@ -104,7 +105,13 @@ class CallService : Service() {
             return START_NOT_STICKY
         }
 
-        startForegroundCompat(buildNotification(statusText))
+        if (intent?.action == ACTION_TOGGLE_MIC) {
+            startForegroundCompat(buildNotification(notificationText()))
+            setMicrophoneEnabled(!microphoneEnabled)
+            return START_NOT_STICKY
+        }
+
+        startForegroundCompat(buildNotification(notificationText()))
 
         roomId = intent?.getStringExtra(EXTRA_ROOM_ID)
         guestId = intent?.getStringExtra(EXTRA_GUEST_ID)
@@ -262,15 +269,21 @@ class CallService : Service() {
 
     private fun setMicrophoneEnabled(enabled: Boolean) {
         microphoneEnabled = enabled
+        updateNotification()
         scope.launch {
             try {
                 room?.localParticipant?.setMicrophoneEnabled(enabled)
                 Log.i("OndaCall", "Microphone enabled: $enabled")
             } catch (error: Exception) {
                 Log.e("OndaCall", "Could not change microphone state.", error)
+                microphoneEnabled = !enabled
+                updateNotification()
             }
         }
     }
+
+    private fun notificationText(): String =
+        if (microphoneEnabled) statusText else "Microfone silenciado"
 
     private fun audioDevices(): List<Map<String, Any?>>? {
         val handler = room?.audioSwitchHandler ?: return null
@@ -368,7 +381,7 @@ class CallService : Service() {
 
     private fun updateNotification() {
         val manager = getSystemService(NotificationManager::class.java)
-        manager.notify(NOTIFICATION_ID, buildNotification(statusText))
+        manager.notify(NOTIFICATION_ID, buildNotification(notificationText()))
     }
 
     private fun createNotificationChannel() {
@@ -405,6 +418,14 @@ class CallService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val micIntent = Intent(this, CallService::class.java).setAction(ACTION_TOGGLE_MIC)
+        val micPending = PendingIntent.getService(
+            this,
+            2,
+            micIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_menu_call)
             .setContentTitle("Onda")
@@ -413,6 +434,7 @@ class CallService : Service() {
             .setOngoing(true)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setPriority(NotificationCompat.PRIORITY_LOW)
+            .addAction(0, if (microphoneEnabled) "Silenciar" else "Ativar", micPending)
             .addAction(0, "Encerrar", stopPending)
             .build()
     }

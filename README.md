@@ -54,6 +54,7 @@ Integração web → nativo validada em produção:
 - microfone nativo publicado;
 - botão de microfone controla o serviço nativo;
 - chamada continua em segundo plano;
+- notificação com ações **Silenciar/Ativar** e **Encerrar**;
 - presença renovada pelo serviço nativo;
 - reconexão do LiveKit após troca de rede;
 - wake lock parcial durante a chamada;
