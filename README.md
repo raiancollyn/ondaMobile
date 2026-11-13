@@ -53,7 +53,12 @@ Integração web → nativo validada em produção:
 - a WebView não abre uma conexão de mídia duplicada;
 - microfone nativo publicado;
 - botão de microfone controla o serviço nativo;
-- chamada continua em segundo plano.
+- chamada continua em segundo plano;
+- presença renovada pelo serviço nativo;
+- reconexão do LiveKit após troca de rede;
+- wake lock parcial durante a chamada;
+- tarjas nativas no topo e na base para as barras do sistema;
+- seleção de alto-falante, auricular, Bluetooth e fone com fio.
 
 Ainda não implementado:
 
@@ -61,7 +66,7 @@ Ainda não implementado:
 - câmera;
 - compartilhamento de tela;
 - indicador de “falando” alimentado pelo LiveKit nativo;
-- controle de volume do áudio remoto nativo.
+- controle de volume individual do áudio remoto nativo.
 
 ## Requisitos
 

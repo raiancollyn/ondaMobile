@@ -2,11 +2,15 @@ package net.dpbr.onda;
 
 import android.content.Intent;
 import androidx.core.content.ContextCompat;
+import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+
+import java.util.List;
+import java.util.Map;
 
 @CapacitorPlugin(name = "OndaMedia")
 public class OndaMediaPlugin extends Plugin {
@@ -47,6 +51,49 @@ public class OndaMediaPlugin extends Plugin {
             ContextCompat.startForegroundService(getContext(), intent);
         }
         call.resolve(new JSObject().put("started", true));
+    }
+
+    @PluginMethod
+    public void setTheme(PluginCall call) {
+        if (getActivity() instanceof MainActivity) {
+            ((MainActivity) getActivity()).updateSystemBarTheme(call.getString("theme"));
+        }
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void getAudioDevices(PluginCall call) {
+        List<Map<String, Object>> devices = CallService.getAudioDevices();
+        if (devices == null) {
+            call.reject("A chamada nativa não está ativa.");
+            return;
+        }
+
+        JSArray result = new JSArray();
+        for (Map<String, Object> device : devices) {
+            JSObject item = new JSObject();
+            item.put("id", device.get("id"));
+            item.put("label", device.get("label"));
+            item.put("selected", device.get("selected"));
+            result.put(item);
+        }
+        call.resolve(new JSObject().put("devices", result));
+    }
+
+    @PluginMethod
+    public void selectAudioDevice(PluginCall call) {
+        String id = call.getString("id");
+        if (id == null || id.isEmpty()) {
+            call.reject("Rota de áudio inválida.");
+            return;
+        }
+
+        boolean selected = CallService.selectAudioDevice(id);
+        if (!selected) {
+            call.reject("Rota de áudio indisponível.");
+            return;
+        }
+        call.resolve(new JSObject().put("selected", true));
     }
 
     @PluginMethod

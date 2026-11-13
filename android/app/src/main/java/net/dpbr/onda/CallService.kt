@@ -7,8 +7,11 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.ConnectivityManager
+import android.net.Network
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import io.livekit.android.LiveKit
@@ -45,6 +48,13 @@ class CallService : Service() {
         fun setMicrophone(enabled: Boolean) {
             current?.setMicrophoneEnabled(enabled)
         }
+
+        @JvmStatic
+        fun getAudioDevices(): List<Map<String, Any?>>? = current?.audioDevices()
+
+        @JvmStatic
+        fun selectAudioDevice(id: String): Boolean =
+            current?.applyAudioDevice(id) ?: false
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -55,11 +65,33 @@ class CallService : Service() {
     private var guestId: String? = null
     private var presenceUrl: String? = null
     private var heartbeatJob: Job? = null
+    private var liveKitUrl: String? = null
+    private var liveKitToken: String? = null
+    private var microphoneEnabled = true
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var reconnectJob: Job? = null
+    private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onCreate() {
         super.onCreate()
         current = this
+        acquireWakeLock()
         createNotificationChannel()
+    }
+
+    private fun acquireWakeLock() {
+        try {
+            val powerManager = getSystemService(PowerManager::class.java) ?: return
+            wakeLock = powerManager.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "onda:voice_call"
+            ).apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+        } catch (error: Exception) {
+            Log.w("OndaCall", "Could not acquire wake lock.", error)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -89,6 +121,8 @@ class CallService : Service() {
         }
 
         connecting = true
+        liveKitUrl = url
+        liveKitToken = token
         statusText = "Conectando a chamada..."
         updateNotification()
         scope.launch {
@@ -96,10 +130,11 @@ class CallService : Service() {
                 val liveKitRoom = LiveKit.create(applicationContext)
                 room = liveKitRoom
                 liveKitRoom.connect(url, token)
-                liveKitRoom.localParticipant.setMicrophoneEnabled(true)
+                liveKitRoom.localParticipant.setMicrophoneEnabled(microphoneEnabled)
                 statusText = "Chamada de voz em andamento"
                 updateNotification()
                 startPresenceHeartbeat()
+                registerNetworkCallback()
                 Log.i("OndaCall", "Connected to LiveKit room and microphone enabled.")
             } catch (error: Exception) {
                 Log.e("OndaCall", "LiveKit connection failed.", error)
@@ -113,10 +148,81 @@ class CallService : Service() {
         }
     }
 
+    private fun registerNetworkCallback() {
+        if (networkCallback != null) {
+            return
+        }
+
+        try {
+            val connectivity = getSystemService(ConnectivityManager::class.java) ?: return
+            val callback = object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) {
+                    Log.i("OndaCall", "Network available; scheduling LiveKit reconnect.")
+                    scheduleReconnect()
+                }
+            }
+            connectivity.registerDefaultNetworkCallback(callback)
+            networkCallback = callback
+        } catch (error: Exception) {
+            Log.w("OndaCall", "Could not register network callback.", error)
+        }
+    }
+
+    private fun scheduleReconnect() {
+        if (liveKitUrl.isNullOrBlank() || liveKitToken.isNullOrBlank() || room == null) {
+            return;
+        }
+
+        reconnectJob?.cancel()
+        reconnectJob = scope.launch {
+            delay(1500)
+            reconnectLiveKit()
+        }
+    }
+
+    private suspend fun reconnectLiveKit() {
+        if (connecting || room == null) {
+            return
+        }
+
+        val url = liveKitUrl ?: return
+        val token = liveKitToken ?: return
+        val oldRoom = room
+        connecting = true
+        statusText = "Reconectando a chamada..."
+        updateNotification()
+        try {
+            oldRoom?.disconnect()
+            val newRoom = LiveKit.create(applicationContext)
+            room = newRoom
+            newRoom.connect(url, token)
+            newRoom.localParticipant.setMicrophoneEnabled(microphoneEnabled)
+            statusText = "Chamada de voz em andamento"
+            updateNotification()
+            Log.i("OndaCall", "LiveKit reconnected after network change.")
+        } catch (error: Exception) {
+            Log.e("OndaCall", "LiveKit reconnect failed.", error)
+            statusText = "Tentando reconectar..."
+            updateNotification()
+        } finally {
+            connecting = false
+        }
+    }
+
     override fun onDestroy() {
         if (current === this) {
             current = null
         }
+        networkCallback?.let { callback ->
+            try {
+                getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(callback)
+            } catch (error: Exception) {
+                Log.w("OndaCall", "Could not unregister network callback.", error)
+            }
+        }
+        networkCallback = null
+        reconnectJob?.cancel()
+        reconnectJob = null
         heartbeatJob?.cancel()
         heartbeatJob = null
         runBlocking {
@@ -134,11 +240,22 @@ class CallService : Service() {
             }
         }
         scope.cancel()
+        wakeLock?.let { lock ->
+            try {
+                if (lock.isHeld) {
+                    lock.release()
+                }
+            } catch (error: Exception) {
+                Log.w("OndaCall", "Could not release wake lock.", error)
+            }
+        }
+        wakeLock = null
         Log.i("OndaCall", "Foreground call service stopped.")
         super.onDestroy()
     }
 
     private fun setMicrophoneEnabled(enabled: Boolean) {
+        microphoneEnabled = enabled
         scope.launch {
             try {
                 room?.localParticipant?.setMicrophoneEnabled(enabled)
@@ -147,6 +264,37 @@ class CallService : Service() {
                 Log.e("OndaCall", "Could not change microphone state.", error)
             }
         }
+    }
+
+    private fun audioDevices(): List<Map<String, Any?>>? {
+        val handler = room?.audioSwitchHandler ?: return null
+        val selectedType = handler.selectedAudioDevice?.javaClass?.simpleName
+        return handler.availableAudioDevices.map { device ->
+            val type = device.javaClass.simpleName
+            mapOf(
+                "id" to type,
+                "label" to audioDeviceLabel(type),
+                "selected" to (type == selectedType)
+            )
+        }
+    }
+
+    private fun applyAudioDevice(id: String): Boolean {
+        val handler = room?.audioSwitchHandler ?: return false
+        val device = handler.availableAudioDevices.firstOrNull {
+            it.javaClass.simpleName.equals(id, ignoreCase = true)
+        } ?: return false
+        handler.selectDevice(device)
+        Log.i("OndaCall", "Audio route selected: $id")
+        return true
+    }
+
+    private fun audioDeviceLabel(type: String): String = when (type) {
+        "Speakerphone" -> "Alto-falante"
+        "Earpiece" -> "Auricular"
+        "BluetoothHeadset" -> "Bluetooth"
+        "WiredHeadset" -> "Fone com fio"
+        else -> type
     }
 
     private fun startPresenceHeartbeat() {

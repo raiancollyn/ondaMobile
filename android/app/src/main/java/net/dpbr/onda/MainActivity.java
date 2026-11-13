@@ -4,16 +4,24 @@ import android.Manifest;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.graphics.Color;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.Gravity;
+import android.view.View;
 import android.view.WindowInsets;
+import android.widget.FrameLayout;
 import android.widget.Toast;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
     private static final int CALL_PERMISSIONS_REQUEST = 42;
+    private static final int DARK_SCRIM = Color.rgb(12, 25, 22);
+    private static final int LIGHT_SCRIM = Color.rgb(247, 243, 235);
     private boolean bridgeProbeScheduled;
     private boolean startCallWhenGranted;
     private String pendingCallUrl;
@@ -21,11 +29,14 @@ public class MainActivity extends BridgeActivity {
     private String pendingCallRoomId;
     private String pendingCallGuestId;
     private String pendingCallPresenceUrl;
+    private View statusBarScrim;
+    private View navigationBarScrim;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(OndaMediaPlugin.class);
         super.onCreate(savedInstanceState);
+        installSystemBarScrims();
 
         boolean debuggable = (getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0;
         if (debuggable && getIntent().getBooleanExtra("onda_test_call", false)) {
@@ -131,7 +142,6 @@ public class MainActivity extends BridgeActivity {
         getBridge().getWebView().postDelayed(this::applySafeAreaInsets, 700);
         getBridge().getWebView().postDelayed(this::applySafeAreaInsets, 3500);
         getBridge().getWebView().postDelayed(this::applySafeAreaInsets, 8000);
-
         if (bridgeProbeScheduled) {
             return;
         }
@@ -177,6 +187,18 @@ public class MainActivity extends BridgeActivity {
         float density = getResources().getDisplayMetrics().density;
         int top = Math.round(topPx / density);
         int bottom = Math.round(bottomPx / density);
+        updateSystemBarScrims(topPx, bottomPx);
+
+        if (getBridge() != null && getBridge().getWebView() != null) {
+            getBridge().getWebView().evaluateJavascript(
+                "document.documentElement.dataset.theme || 'dark'",
+                value -> {
+                    String theme = value == null ? "dark" : value.replace("\"", "");
+                    updateSystemBarTheme(theme);
+                }
+            );
+        }
+
         String script =
             "(function () {" +
                 "const top = " + top + ";" +
@@ -188,5 +210,69 @@ public class MainActivity extends BridgeActivity {
             "})();";
 
         getBridge().getWebView().evaluateJavascript(script, null);
+    }
+
+    private void installSystemBarScrims() {
+        if (statusBarScrim != null) {
+            return;
+        }
+
+        statusBarScrim = new View(this);
+        statusBarScrim.setBackgroundColor(DARK_SCRIM);
+        statusBarScrim.setClickable(false);
+        addContentView(
+            statusBarScrim,
+            new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                0,
+                Gravity.TOP
+            )
+        );
+
+        navigationBarScrim = new View(this);
+        navigationBarScrim.setBackgroundColor(DARK_SCRIM);
+        navigationBarScrim.setClickable(false);
+        addContentView(
+            navigationBarScrim,
+            new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                0,
+                Gravity.BOTTOM
+            )
+        );
+    }
+
+    private void updateSystemBarScrims(int topPx, int bottomPx) {
+        if (statusBarScrim != null) {
+            FrameLayout.LayoutParams params =
+                (FrameLayout.LayoutParams) statusBarScrim.getLayoutParams();
+            params.height = Math.max(0, topPx);
+            statusBarScrim.setLayoutParams(params);
+            statusBarScrim.setVisibility(topPx > 0 ? View.VISIBLE : View.GONE);
+        }
+
+        if (navigationBarScrim != null) {
+            FrameLayout.LayoutParams params =
+                (FrameLayout.LayoutParams) navigationBarScrim.getLayoutParams();
+            params.height = Math.max(0, bottomPx);
+            navigationBarScrim.setLayoutParams(params);
+            navigationBarScrim.setVisibility(bottomPx > 0 ? View.VISIBLE : View.GONE);
+        }
+    }
+
+    public void updateSystemBarTheme(String theme) {
+        boolean light = "light".equalsIgnoreCase(theme);
+        int color = light ? LIGHT_SCRIM : DARK_SCRIM;
+        if (statusBarScrim != null) {
+            statusBarScrim.setBackgroundColor(color);
+        }
+        if (navigationBarScrim != null) {
+            navigationBarScrim.setBackgroundColor(color);
+        }
+
+        WindowInsetsControllerCompat controller =
+            WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
+        controller.setAppearanceLightStatusBars(light);
+        controller.setAppearanceLightNavigationBars(light);
     }
 }
