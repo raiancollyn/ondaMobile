@@ -16,6 +16,8 @@ public class MainActivity extends BridgeActivity {
     private static final int CALL_PERMISSIONS_REQUEST = 42;
     private boolean bridgeProbeScheduled;
     private boolean startCallWhenGranted;
+    private String pendingCallUrl;
+    private String pendingCallToken;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -24,11 +26,21 @@ public class MainActivity extends BridgeActivity {
 
         boolean debuggable = (getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0;
         if (debuggable && getIntent().getBooleanExtra("onda_test_call", false)) {
-            startCallWithPermissions();
+            startCallWithPermissions(
+                getIntent().getStringExtra("onda_test_url"),
+                getIntent().getStringExtra("onda_test_token")
+            );
         }
     }
 
     public void startCallWithPermissions() {
+        startCallWithPermissions(null, null);
+    }
+
+    public void startCallWithPermissions(String url, String token) {
+        pendingCallUrl = url;
+        pendingCallToken = token;
+
         String[] needed = {
             Manifest.permission.RECORD_AUDIO,
             Manifest.permission.POST_NOTIFICATIONS
@@ -53,6 +65,12 @@ public class MainActivity extends BridgeActivity {
     private void startCallService() {
         Intent callIntent = new Intent(this, CallService.class)
             .setAction(CallService.ACTION_START);
+        if (pendingCallUrl != null && !pendingCallUrl.isEmpty()) {
+            callIntent.putExtra(CallService.EXTRA_URL, pendingCallUrl);
+        }
+        if (pendingCallToken != null && !pendingCallToken.isEmpty()) {
+            callIntent.putExtra(CallService.EXTRA_TOKEN, pendingCallToken);
+        }
         ContextCompat.startForegroundService(this, callIntent);
     }
 

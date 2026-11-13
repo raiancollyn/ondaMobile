@@ -14,7 +14,11 @@ para a futura camada de mídia.
 - `CallService` em primeiro plano, com notificação persistente e ação
   **Encerrar**;
 - permissões de microfone, notificação e foreground service;
-- plugin `OndaMedia` com `ping`, `startCallService` e `stopCallService`.
+- plugin `OndaMedia` com `ping`, `startCall`, `startCallService` e
+  `stopCallService`;
+- SDK LiveKit Android 2.18.2;
+- conexão nativa ao LiveKit e publicação do microfone;
+- áudio da chamada mantido com o app em segundo plano.
 
 Testado no aparelho:
 
@@ -28,19 +32,26 @@ Resultado da ponte nativa:
 
 ```text
 OndaBridge: "{\"ok\":true,\"platform\":\"android\",\"version\":\"0.0.1\"}"
-OndaCall: "Foreground call service started."
+OndaCall: "Connected to LiveKit room and microphone enabled."
 ```
 
-O serviço ficou ativo com o app em segundo plano e com a notificação
-`Chamada de voz em andamento`.
+Teste de chamada realizado com um LiveKit local:
+
+```text
+Room: devtest
+Participante: android-test
+Track: TR_... (MICROPHONE, audio/red)
+Estado: ACTIVE
+Bitrate: ~48 kbps
+Conexão: udp / EXCELLENT
+```
 
 Ainda não implementado:
 
-- conexão nativa ao LiveKit;
-- publicação de microfone;
+- token LiveKit obtido automaticamente pela sala do site;
+- integração da chamada nativa com os botões e o estado da UI Blazor;
 - câmera;
-- compartilhamento de tela;
-- integração da chamada nativa com a UI da sala.
+- compartilhamento de tela.
 
 ## Requisitos
 

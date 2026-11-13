@@ -20,6 +20,27 @@ public class OndaMediaPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void startCall(PluginCall call) {
+        String url = call.getString("url");
+        String token = call.getString("token");
+        if (url == null || token == null || url.isEmpty() || token.isEmpty()) {
+            call.reject("URL e token do LiveKit são obrigatórios.");
+            return;
+        }
+
+        if (getActivity() instanceof MainActivity) {
+            ((MainActivity) getActivity()).startCallWithPermissions(url, token);
+        } else {
+            Intent intent = new Intent(getContext(), CallService.class)
+                .setAction(CallService.ACTION_START)
+                .putExtra(CallService.EXTRA_URL, url)
+                .putExtra(CallService.EXTRA_TOKEN, token);
+            ContextCompat.startForegroundService(getContext(), intent);
+        }
+        call.resolve(new JSObject().put("started", true));
+    }
+
+    @PluginMethod
     public void startCallService(PluginCall call) {
         if (getActivity() instanceof MainActivity) {
             ((MainActivity) getActivity()).startCallWithPermissions();
