@@ -46,12 +46,22 @@ Bitrate: ~48 kbps
 Conexão: udp / EXCELLENT
 ```
 
+Integração web → nativo validada em produção:
+
+- a sala Blazor detecta o Capacitor Android;
+- envia URL e token LiveKit ao plugin;
+- a WebView não abre uma conexão de mídia duplicada;
+- microfone nativo publicado;
+- botão de microfone controla o serviço nativo;
+- chamada continua em segundo plano.
+
 Ainda não implementado:
 
-- token LiveKit obtido automaticamente pela sala do site;
-- integração da chamada nativa com os botões e o estado da UI Blazor;
+- renderização de vídeo nativo na interface;
 - câmera;
-- compartilhamento de tela.
+- compartilhamento de tela;
+- indicador de “falando” alimentado pelo LiveKit nativo;
+- controle de volume do áudio remoto nativo.
 
 ## Requisitos
 
