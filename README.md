@@ -59,12 +59,14 @@ Integração web → nativo validada em produção:
 - reconexão do LiveKit após troca de rede;
 - wake lock parcial durante a chamada;
 - tarjas nativas no topo e na base para as barras do sistema;
-- seleção de alto-falante, auricular, Bluetooth e fone com fio.
+- seleção de alto-falante, auricular, Bluetooth e fone com fio;
+- câmera nativa com preview local e publicação para a sala;
+- os vídeos remotos ainda não são renderizados dentro do app.
 
 Ainda não implementado:
 
 - renderização de vídeo nativo na interface;
-- câmera;
+- renderização remota de vídeo no app;
 - compartilhamento de tela;
 - indicador de “falando” alimentado pelo LiveKit nativo;
 - controle de volume individual do áudio remoto nativo.

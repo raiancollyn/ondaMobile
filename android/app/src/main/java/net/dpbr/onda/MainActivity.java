@@ -20,6 +20,8 @@ import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 import com.getcapacitor.BridgeActivity;
+import io.livekit.android.renderer.SurfaceViewRenderer;
+import livekit.org.webrtc.RendererCommon;
 
 public class MainActivity extends BridgeActivity {
     private static final int CALL_PERMISSIONS_REQUEST = 42;
@@ -39,12 +41,14 @@ public class MainActivity extends BridgeActivity {
     private boolean insetsListenerInstalled;
     private int appliedTopInset = -1;
     private int appliedBottomInset = -1;
+    private SurfaceViewRenderer cameraPreview;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(OndaMediaPlugin.class);
         super.onCreate(savedInstanceState);
         installSystemBarScrims();
+        installCameraPreview();
         installWindowInsetsListener();
         getWindow().getDecorView().post(this::applySafeAreaInsets);
 
@@ -262,6 +266,7 @@ public class MainActivity extends BridgeActivity {
 
         appliedTopInset = topPx;
         appliedBottomInset = bottomPx;
+        updateCameraPreviewPosition(topPx, bottomPx);
         View webView = getBridge().getWebView();
         webView.setPadding(0, 0, 0, 0);
         View parent = (View) webView.getParent();
@@ -291,6 +296,55 @@ public class MainActivity extends BridgeActivity {
             applyWebViewInsets(top, bottom);
             return insets;
         });
+    }
+
+    private void installCameraPreview() {
+        if (cameraPreview != null) {
+            return;
+        }
+
+        cameraPreview = new SurfaceViewRenderer(this);
+        cameraPreview.setVisibility(View.GONE);
+        cameraPreview.setMirror(true);
+        cameraPreview.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL);
+        cameraPreview.setEnableHardwareScaler(true);
+        cameraPreview.setZOrderMediaOverlay(true);
+
+        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(dp(116), dp(154));
+        params.gravity = Gravity.BOTTOM | Gravity.END;
+        params.bottomMargin = dp(96);
+        params.rightMargin = dp(12);
+        addContentView(cameraPreview, params);
+
+        CallService.attachCameraPreview(cameraPreview);
+        CallService.cameraStateListener = enabled -> runOnUiThread(() -> {
+            if (cameraPreview != null) {
+                cameraPreview.setVisibility(enabled ? View.VISIBLE : View.GONE);
+            }
+        });
+    }
+
+    private void updateCameraPreviewPosition(int topPx, int bottomPx) {
+        if (cameraPreview == null || cameraPreview.getLayoutParams() == null) {
+            return;
+        }
+
+        FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) cameraPreview.getLayoutParams();
+        params.bottomMargin = bottomPx + dp(92);
+        params.rightMargin = dp(12);
+        cameraPreview.setLayoutParams(params);
+    }
+
+    private int dp(int value) {
+        return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+
+    @Override
+    public void onStop() {
+        super.onStop();
+        if (!isChangingConfigurations()) {
+            CallService.setCamera(false);
+        }
     }
 
     private void installSystemBarScrims() {

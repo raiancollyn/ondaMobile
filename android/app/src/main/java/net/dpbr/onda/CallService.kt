@@ -15,7 +15,10 @@ import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import io.livekit.android.LiveKit
+import io.livekit.android.renderer.SurfaceViewRenderer
 import io.livekit.android.room.Room
+import io.livekit.android.room.track.LocalVideoTrack
+import io.livekit.android.room.track.Track
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -56,6 +59,27 @@ class CallService : Service() {
         fun isMicrophoneEnabled(): Boolean = current?.microphoneEnabled ?: false
 
         @JvmStatic
+        fun setCamera(enabled: Boolean) {
+            current?.setCameraEnabled(enabled)
+        }
+
+        @JvmStatic
+        fun isCameraEnabled(): Boolean = current?.cameraEnabled ?: false
+
+        @JvmStatic
+        fun attachCameraPreview(renderer: SurfaceViewRenderer?) {
+            current?.attachCameraRenderer(renderer)
+        }
+
+        interface CameraStateListener {
+            fun onCameraStateChanged(enabled: Boolean)
+        }
+
+        @JvmField
+        @Volatile
+        var cameraStateListener: CameraStateListener? = null
+
+        @JvmStatic
         fun getAudioDevices(): List<Map<String, Any?>>? = current?.audioDevices()
 
         @JvmStatic
@@ -76,6 +100,10 @@ class CallService : Service() {
     private var liveKitUrl: String? = null
     private var liveKitToken: String? = null
     private var microphoneEnabled = true
+    private var cameraEnabled = false
+    private var localVideoTrack: LocalVideoTrack? = null
+    private var cameraPreview: SurfaceViewRenderer? = null
+    private var cameraPreviewInitialized = false
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var reconnectJob: Job? = null
     private var wakeLock: PowerManager.WakeLock? = null
@@ -213,6 +241,18 @@ class CallService : Service() {
             room = newRoom
             newRoom.connect(url, token)
             newRoom.localParticipant.setMicrophoneEnabled(microphoneEnabled)
+            cameraPreviewInitialized = false
+            if (cameraEnabled) {
+                try {
+                    newRoom.localParticipant.setCameraEnabled(true)
+                    localVideoTrack = newRoom.localParticipant
+                        .getTrackPublication(Track.Source.CAMERA)
+                        ?.track as? LocalVideoTrack
+                    attachCameraRenderer(cameraPreview)
+                } catch (cameraError: Exception) {
+                    Log.w("OndaCall", "Could not restore camera after reconnect.", cameraError)
+                }
+            }
             statusText = "Chamada de voz em andamento"
             updateNotification()
             Log.i("OndaCall", "LiveKit reconnected after network change.")
@@ -241,6 +281,11 @@ class CallService : Service() {
         reconnectJob = null
         heartbeatJob?.cancel()
         heartbeatJob = null
+        cameraEnabled = false
+        detachCameraTrack()
+        cameraPreview = null
+        cameraPreviewInitialized = false
+        cameraStateListener?.onCameraStateChanged(false)
         runBlocking {
             withContext(Dispatchers.IO) {
                 postPresence("leave")
@@ -317,6 +362,88 @@ class CallService : Service() {
         "BluetoothHeadset" -> "Bluetooth"
         "WiredHeadset" -> "Fone com fio"
         else -> type
+    }
+
+    private fun setCameraEnabled(enabled: Boolean) {
+        if (enabled == cameraEnabled && (!enabled || localVideoTrack != null)) {
+            if (enabled) {
+                attachCameraRenderer(cameraPreview)
+            }
+            return
+        }
+
+        cameraEnabled = enabled
+        scope.launch {
+            val participant = room?.localParticipant
+            if (participant == null) {
+                cameraEnabled = false
+                cameraStateListener?.onCameraStateChanged(false)
+                return@launch
+            }
+
+            try {
+                participant.setCameraEnabled(enabled)
+                if (enabled) {
+                    val track = participant
+                        .getTrackPublication(Track.Source.CAMERA)
+                        ?.track as? LocalVideoTrack
+                    localVideoTrack = track
+                    attachCameraRenderer(cameraPreview)
+                    Log.i("OndaCall", "Camera enabled.")
+                } else {
+                    detachCameraTrack()
+                    Log.i("OndaCall", "Camera disabled.")
+                }
+            } catch (error: Exception) {
+                Log.e("OndaCall", "Could not change camera state.", error)
+                cameraEnabled = false
+                detachCameraTrack()
+            }
+
+            cameraStateListener?.onCameraStateChanged(cameraEnabled)
+        }
+    }
+
+    private fun attachCameraRenderer(renderer: SurfaceViewRenderer?) {
+        if (cameraPreview !== renderer) {
+            val previous = cameraPreview
+            if (previous != null) {
+                try {
+                    localVideoTrack?.removeRenderer(previous)
+                } catch (error: Exception) {
+                    Log.w("OndaCall", "Could not detach previous camera preview.", error)
+                }
+            }
+            cameraPreview = renderer
+            cameraPreviewInitialized = false
+        }
+
+        val currentRenderer = renderer ?: return
+        val track = localVideoTrack ?: return
+        try {
+            if (!cameraPreviewInitialized) {
+                room?.initVideoRenderer(currentRenderer)
+                cameraPreviewInitialized = true
+            }
+            track.removeRenderer(currentRenderer)
+            track.addRenderer(currentRenderer)
+            cameraStateListener?.onCameraStateChanged(cameraEnabled)
+        } catch (error: Exception) {
+            Log.e("OndaCall", "Could not attach camera preview.", error)
+        }
+    }
+
+    private fun detachCameraTrack() {
+        val renderer = cameraPreview
+        val track = localVideoTrack
+        if (renderer != null && track != null) {
+            try {
+                track.removeRenderer(renderer)
+            } catch (error: Exception) {
+                Log.w("OndaCall", "Could not detach camera preview.", error)
+            }
+        }
+        localVideoTrack = null
     }
 
     private fun startPresenceHeartbeat() {

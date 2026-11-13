@@ -1,20 +1,27 @@
 package net.dpbr.onda;
 
+import android.Manifest;
 import android.content.Context;
 import android.content.Intent;
 import android.media.AudioManager;
 import androidx.core.content.ContextCompat;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
+import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import com.getcapacitor.annotation.Permission;
+import com.getcapacitor.annotation.PermissionCallback;
 
 import java.util.List;
 import java.util.Map;
 
-@CapacitorPlugin(name = "OndaMedia")
+@CapacitorPlugin(
+    name = "OndaMedia",
+    permissions = @Permission(alias = "camera", strings = { Manifest.permission.CAMERA })
+)
 public class OndaMediaPlugin extends Plugin {
     @PluginMethod
     public void ping(PluginCall call) {
@@ -125,6 +132,42 @@ public class OndaMediaPlugin extends Plugin {
     @PluginMethod
     public void getMic(PluginCall call) {
         call.resolve(new JSObject().put("enabled", CallService.isMicrophoneEnabled()));
+    }
+
+    @PluginMethod
+    public void setCamera(PluginCall call) {
+        if (getPermissionState("camera") != PermissionState.GRANTED) {
+            requestPermissionForAlias("camera", call, "cameraPermissionCallback");
+            return;
+        }
+
+        applyCameraState(call);
+    }
+
+    @PermissionCallback
+    private void cameraPermissionCallback(PluginCall call) {
+        if (getPermissionState("camera") == PermissionState.GRANTED) {
+            applyCameraState(call);
+            return;
+        }
+
+        call.reject("A permissão de câmera é necessária para ligar o vídeo.");
+    }
+
+    private void applyCameraState(PluginCall call) {
+        Boolean enabled = call.getBoolean("enabled", false);
+        boolean next = Boolean.TRUE.equals(enabled);
+        CallService.setCamera(next);
+        call.resolve(new JSObject()
+            .put("enabled", next)
+            .put("running", CallService.isCameraEnabled()));
+    }
+
+    @PluginMethod
+    public void getCamera(PluginCall call) {
+        call.resolve(new JSObject()
+            .put("enabled", CallService.isCameraEnabled())
+            .put("running", CallService.isCameraEnabled()));
     }
 
     @PluginMethod
