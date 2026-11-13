@@ -5,6 +5,7 @@ import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.graphics.drawable.ColorDrawable;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.Gravity;
@@ -14,7 +15,9 @@ import android.widget.FrameLayout;
 import android.widget.Toast;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 import com.getcapacitor.BridgeActivity;
 
@@ -33,12 +36,17 @@ public class MainActivity extends BridgeActivity {
     private int pendingCallAvatarTone;
     private View statusBarScrim;
     private View navigationBarScrim;
+    private boolean insetsListenerInstalled;
+    private int appliedTopInset = -1;
+    private int appliedBottomInset = -1;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(OndaMediaPlugin.class);
         super.onCreate(savedInstanceState);
         installSystemBarScrims();
+        installWindowInsetsListener();
+        getWindow().getDecorView().post(this::applySafeAreaInsets);
 
         boolean debuggable = (getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0;
         if (debuggable && getIntent().getBooleanExtra("onda_test_call", false)) {
@@ -208,6 +216,7 @@ public class MainActivity extends BridgeActivity {
         int top = Math.round(topPx / density);
         int bottom = Math.round(bottomPx / density);
         updateSystemBarScrims(topPx, bottomPx);
+        applyWebViewInsets(topPx, bottomPx);
 
         if (getBridge() != null && getBridge().getWebView() != null) {
             getBridge().getWebView().evaluateJavascript(
@@ -221,15 +230,55 @@ public class MainActivity extends BridgeActivity {
 
         String script =
             "(function () {" +
-                "const top = " + top + ";" +
-                "const bottom = " + bottom + ";" +
                 "let style = document.getElementById('onda-mobile-safe-area');" +
                 "if (!style) { style = document.createElement('style'); style.id = 'onda-mobile-safe-area'; document.head.appendChild(style); }" +
-                "style.textContent = 'html.onda-mobile body{padding-top:' + top + 'px !important;padding-bottom:' + bottom + 'px !important;} html.onda-mobile .site-header{top:' + top + 'px !important;} html.onda-mobile .room-app{height:calc(100vh - ' + (top + bottom) + 'px) !important;}';" +
+                "style.textContent = 'html.onda-mobile body{padding-top:0 !important;padding-bottom:0 !important;} html.onda-mobile .site-header{top:0 !important;} html.onda-mobile .room-app{height:100vh !important;}';" +
                 "document.documentElement.classList.add('onda-mobile');" +
             "})();";
 
         getBridge().getWebView().evaluateJavascript(script, null);
+    }
+
+    private void applyWebViewInsets(int topPx, int bottomPx) {
+        if (getBridge() == null || getBridge().getWebView() == null) {
+            return;
+        }
+
+        if (topPx == appliedTopInset && bottomPx == appliedBottomInset) {
+            return;
+        }
+
+        appliedTopInset = topPx;
+        appliedBottomInset = bottomPx;
+        View webView = getBridge().getWebView();
+        webView.setPadding(0, 0, 0, 0);
+        View parent = (View) webView.getParent();
+        if (parent instanceof android.view.ViewGroup) {
+            android.view.ViewGroup.LayoutParams params = webView.getLayoutParams();
+            if (params instanceof android.view.ViewGroup.MarginLayoutParams) {
+                android.view.ViewGroup.MarginLayoutParams margins =
+                    (android.view.ViewGroup.MarginLayoutParams) params;
+                margins.topMargin = topPx;
+                margins.bottomMargin = bottomPx;
+                webView.setLayoutParams(margins);
+            }
+        }
+    }
+
+    private void installWindowInsetsListener() {
+        if (insetsListenerInstalled) {
+            return;
+        }
+
+        insetsListenerInstalled = true;
+        View decor = getWindow().getDecorView();
+        ViewCompat.setOnApplyWindowInsetsListener(decor, (view, insets) -> {
+            int top = insets.getInsets(WindowInsetsCompat.Type.systemBars()).top;
+            int bottom = insets.getInsets(WindowInsetsCompat.Type.systemBars()).bottom;
+            updateSystemBarScrims(top, bottom);
+            applyWebViewInsets(top, bottom);
+            return insets;
+        });
     }
 
     private void installSystemBarScrims() {
@@ -288,6 +337,12 @@ public class MainActivity extends BridgeActivity {
         }
         if (navigationBarScrim != null) {
             navigationBarScrim.setBackgroundColor(color);
+        }
+
+        getWindow().setBackgroundDrawable(new ColorDrawable(color));
+        getWindow().getDecorView().setBackgroundColor(color);
+        if (getBridge() != null && getBridge().getWebView() != null) {
+            getBridge().getWebView().setBackgroundColor(color);
         }
 
         WindowInsetsControllerCompat controller =
