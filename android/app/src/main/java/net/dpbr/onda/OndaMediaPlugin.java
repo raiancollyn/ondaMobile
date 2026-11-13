@@ -29,12 +29,21 @@ public class OndaMediaPlugin extends Plugin {
         }
 
         if (getActivity() instanceof MainActivity) {
-            ((MainActivity) getActivity()).startCallWithPermissions(url, token);
+            ((MainActivity) getActivity()).startCallWithPermissions(
+                url,
+                token,
+                call.getString("roomId"),
+                call.getString("guestId"),
+                call.getString("presenceUrl")
+            );
         } else {
             Intent intent = new Intent(getContext(), CallService.class)
                 .setAction(CallService.ACTION_START)
                 .putExtra(CallService.EXTRA_URL, url)
-                .putExtra(CallService.EXTRA_TOKEN, token);
+                .putExtra(CallService.EXTRA_TOKEN, token)
+                .putExtra(CallService.EXTRA_ROOM_ID, call.getString("roomId"))
+                .putExtra(CallService.EXTRA_GUEST_ID, call.getString("guestId"))
+                .putExtra(CallService.EXTRA_PRESENCE_URL, call.getString("presenceUrl"));
             ContextCompat.startForegroundService(getContext(), intent);
         }
         call.resolve(new JSObject().put("started", true));

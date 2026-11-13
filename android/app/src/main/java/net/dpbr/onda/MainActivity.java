@@ -18,6 +18,9 @@ public class MainActivity extends BridgeActivity {
     private boolean startCallWhenGranted;
     private String pendingCallUrl;
     private String pendingCallToken;
+    private String pendingCallRoomId;
+    private String pendingCallGuestId;
+    private String pendingCallPresenceUrl;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -28,7 +31,10 @@ public class MainActivity extends BridgeActivity {
         if (debuggable && getIntent().getBooleanExtra("onda_test_call", false)) {
             startCallWithPermissions(
                 getIntent().getStringExtra("onda_test_url"),
-                getIntent().getStringExtra("onda_test_token")
+                getIntent().getStringExtra("onda_test_token"),
+                getIntent().getStringExtra("onda_test_room"),
+                getIntent().getStringExtra("onda_test_guest"),
+                getIntent().getStringExtra("onda_test_presence")
             );
         }
     }
@@ -38,8 +44,21 @@ public class MainActivity extends BridgeActivity {
     }
 
     public void startCallWithPermissions(String url, String token) {
+        startCallWithPermissions(url, token, null, null, null);
+    }
+
+    public void startCallWithPermissions(
+        String url,
+        String token,
+        String roomId,
+        String guestId,
+        String presenceUrl
+    ) {
         pendingCallUrl = url;
         pendingCallToken = token;
+        pendingCallRoomId = roomId;
+        pendingCallGuestId = guestId;
+        pendingCallPresenceUrl = presenceUrl;
 
         String[] needed = {
             Manifest.permission.RECORD_AUDIO,
@@ -70,6 +89,15 @@ public class MainActivity extends BridgeActivity {
         }
         if (pendingCallToken != null && !pendingCallToken.isEmpty()) {
             callIntent.putExtra(CallService.EXTRA_TOKEN, pendingCallToken);
+        }
+        if (pendingCallRoomId != null && !pendingCallRoomId.isEmpty()) {
+            callIntent.putExtra(CallService.EXTRA_ROOM_ID, pendingCallRoomId);
+        }
+        if (pendingCallGuestId != null && !pendingCallGuestId.isEmpty()) {
+            callIntent.putExtra(CallService.EXTRA_GUEST_ID, pendingCallGuestId);
+        }
+        if (pendingCallPresenceUrl != null && !pendingCallPresenceUrl.isEmpty()) {
+            callIntent.putExtra(CallService.EXTRA_PRESENCE_URL, pendingCallPresenceUrl);
         }
         ContextCompat.startForegroundService(this, callIntent);
     }

@@ -15,10 +15,16 @@ import io.livekit.android.LiveKit
 import io.livekit.android.room.Room
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import java.net.HttpURLConnection
+import java.net.URL
 
 class CallService : Service() {
     companion object {
@@ -26,6 +32,9 @@ class CallService : Service() {
         const val ACTION_STOP = "net.dpbr.onda.action.STOP_CALL"
         const val EXTRA_URL = "net.dpbr.onda.extra.LIVEKIT_URL"
         const val EXTRA_TOKEN = "net.dpbr.onda.extra.LIVEKIT_TOKEN"
+        const val EXTRA_ROOM_ID = "net.dpbr.onda.extra.ROOM_ID"
+        const val EXTRA_GUEST_ID = "net.dpbr.onda.extra.GUEST_ID"
+        const val EXTRA_PRESENCE_URL = "net.dpbr.onda.extra.PRESENCE_URL"
         private const val CHANNEL_ID = "onda_call"
         private const val NOTIFICATION_ID = 1001
 
@@ -42,6 +51,10 @@ class CallService : Service() {
     private var room: Room? = null
     private var connecting = false
     private var statusText = "Chamada de voz em andamento"
+    private var roomId: String? = null
+    private var guestId: String? = null
+    private var presenceUrl: String? = null
+    private var heartbeatJob: Job? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -56,6 +69,10 @@ class CallService : Service() {
         }
 
         startForegroundCompat(buildNotification(statusText))
+
+        roomId = intent?.getStringExtra(EXTRA_ROOM_ID)
+        guestId = intent?.getStringExtra(EXTRA_GUEST_ID)
+        presenceUrl = intent?.getStringExtra(EXTRA_PRESENCE_URL)
 
         val url = intent?.getStringExtra(EXTRA_URL)
         val token = intent?.getStringExtra(EXTRA_TOKEN)
@@ -82,6 +99,7 @@ class CallService : Service() {
                 liveKitRoom.localParticipant.setMicrophoneEnabled(true)
                 statusText = "Chamada de voz em andamento"
                 updateNotification()
+                startPresenceHeartbeat()
                 Log.i("OndaCall", "Connected to LiveKit room and microphone enabled.")
             } catch (error: Exception) {
                 Log.e("OndaCall", "LiveKit connection failed.", error)
@@ -98,6 +116,13 @@ class CallService : Service() {
     override fun onDestroy() {
         if (current === this) {
             current = null
+        }
+        heartbeatJob?.cancel()
+        heartbeatJob = null
+        runBlocking {
+            withContext(Dispatchers.IO) {
+                postPresence("leave")
+            }
         }
         val currentRoom = room
         room = null
@@ -120,6 +145,52 @@ class CallService : Service() {
                 Log.i("OndaCall", "Microphone enabled: $enabled")
             } catch (error: Exception) {
                 Log.e("OndaCall", "Could not change microphone state.", error)
+            }
+        }
+    }
+
+    private fun startPresenceHeartbeat() {
+        if (roomId.isNullOrBlank() || guestId.isNullOrBlank() || presenceUrl.isNullOrBlank()) {
+            return
+        }
+
+        heartbeatJob?.cancel()
+        heartbeatJob = scope.launch {
+            while (isActive) {
+                postPresence("heartbeat")
+                delay(30_000)
+            }
+        }
+    }
+
+    private suspend fun postPresence(action: String) {
+        val base = presenceUrl?.trimEnd('/') ?: return
+        val room = roomId ?: return
+        val guest = guestId ?: return
+        if (base.isBlank() || room.isBlank() || guest.isBlank()) {
+            return
+        }
+
+        withContext(Dispatchers.IO) {
+            var connection: HttpURLConnection? = null
+            try {
+                connection = (URL("$base/api/presence/$action").openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    connectTimeout = 5000
+                    readTimeout = 5000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json")
+                }
+                val body = """{"roomId":"$room","guestId":"$guest"}"""
+                connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+                val code = connection.responseCode
+                if (code !in 200..299) {
+                    Log.w("OndaCall", "Presence $action returned HTTP $code.")
+                }
+            } catch (error: Exception) {
+                Log.w("OndaCall", "Presence $action failed.", error)
+            } finally {
+                connection?.disconnect()
             }
         }
     }
