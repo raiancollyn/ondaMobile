@@ -28,6 +28,14 @@ class CallService : Service() {
         const val EXTRA_TOKEN = "net.dpbr.onda.extra.LIVEKIT_TOKEN"
         private const val CHANNEL_ID = "onda_call"
         private const val NOTIFICATION_ID = 1001
+
+        @Volatile
+        private var current: CallService? = null
+
+        @JvmStatic
+        fun setMicrophone(enabled: Boolean) {
+            current?.setMicrophoneEnabled(enabled)
+        }
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -37,6 +45,7 @@ class CallService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        current = this
         createNotificationChannel()
     }
 
@@ -87,6 +96,9 @@ class CallService : Service() {
     }
 
     override fun onDestroy() {
+        if (current === this) {
+            current = null
+        }
         val currentRoom = room
         room = null
         runBlocking {
@@ -99,6 +111,17 @@ class CallService : Service() {
         scope.cancel()
         Log.i("OndaCall", "Foreground call service stopped.")
         super.onDestroy()
+    }
+
+    private fun setMicrophoneEnabled(enabled: Boolean) {
+        scope.launch {
+            try {
+                room?.localParticipant?.setMicrophoneEnabled(enabled)
+                Log.i("OndaCall", "Microphone enabled: $enabled")
+            } catch (error: Exception) {
+                Log.e("OndaCall", "Could not change microphone state.", error)
+            }
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
