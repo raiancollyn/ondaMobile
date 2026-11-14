@@ -90,6 +90,37 @@ public class OndaMediaPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void shareLink(PluginCall call) {
+        String url = call.getString("url");
+        String title = call.getString("title", "Onda");
+        String text = call.getString("text", "");
+
+        if (url == null || url.isEmpty()) {
+            call.reject("Link da sala indisponível.");
+            return;
+        }
+
+        String message = text.isEmpty() ? url : text + "\n" + url;
+        Intent send = new Intent(Intent.ACTION_SEND)
+            .setType("text/plain")
+            .putExtra(Intent.EXTRA_SUBJECT, title)
+            .putExtra(Intent.EXTRA_TEXT, message);
+        Intent chooser = Intent.createChooser(send, "Compartilhar sala");
+
+        try {
+            if (getActivity() != null) {
+                getActivity().startActivity(chooser);
+            } else {
+                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                getContext().startActivity(chooser);
+            }
+            call.resolve(new JSObject().put("shared", true));
+        } catch (Exception error) {
+            call.reject("Não foi possível abrir o compartilhamento.", error);
+        }
+    }
+
+    @PluginMethod
     public void getAudioDevices(PluginCall call) {
         List<Map<String, Object>> devices = CallService.getAudioDevices();
         if (devices == null) {
