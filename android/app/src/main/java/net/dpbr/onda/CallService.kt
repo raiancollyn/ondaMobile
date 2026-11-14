@@ -184,7 +184,8 @@ class CallService : Service() {
                 liveKitRoom.localParticipant.setMicrophoneEnabled(microphoneEnabled)
                 statusText = "Chamada de voz em andamento"
                 updateNotification()
-                startPresenceHeartbeat()
+                startPresenceHeartbeat();
+                postMediaState()
                 registerNetworkCallback()
                 Log.i("OndaCall", "Connected to LiveKit room and microphone enabled.")
             } catch (error: Exception) {
@@ -332,6 +333,7 @@ class CallService : Service() {
         scope.launch {
             try {
                 room?.localParticipant?.setMicrophoneEnabled(enabled)
+                postMediaState()
                 Log.i("OndaCall", "Microphone enabled: $enabled")
             } catch (error: Exception) {
                 Log.e("OndaCall", "Could not change microphone state.", error)
@@ -407,15 +409,18 @@ class CallService : Service() {
                     localVideoTrack = track
                     Log.i("OndaCall", "Camera track available: ${track != null}")
                     attachCameraRenderer(cameraPreview)
+                    postMediaState()
                     Log.i("OndaCall", "Camera enabled.")
                 } else {
                     detachCameraTrack()
+                    postMediaState()
                     Log.i("OndaCall", "Camera disabled.")
                 }
             } catch (error: Exception) {
                 Log.e("OndaCall", "Could not change camera state.", error)
                 cameraEnabled = false
                 detachCameraTrack()
+                postMediaState()
             }
 
             cameraStateListener?.onCameraStateChanged(cameraEnabled)
@@ -508,6 +513,41 @@ class CallService : Service() {
                 Log.w("OndaCall", "Presence $action failed.", error)
             } finally {
                 connection?.disconnect()
+            }
+        }
+    }
+
+    private fun postMediaState() {
+        val base = presenceUrl?.trimEnd('/') ?: return
+        val room = roomId ?: return
+        val guest = guestId ?: return
+        if (base.isBlank() || room.isBlank() || guest.isBlank()) {
+            return
+        }
+
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                var connection: HttpURLConnection? = null
+                try {
+                    connection = (URL("$base/api/presence/media").openConnection() as HttpURLConnection).apply {
+                        requestMethod = "POST"
+                        connectTimeout = 5000
+                        readTimeout = 5000
+                        doOutput = true
+                        setRequestProperty("Content-Type", "application/json")
+                    }
+                    val body =
+                        """{"roomId":"$room","guestId":"$guest","micOn":$microphoneEnabled,"cameraOn":$cameraEnabled,"screenOn":false,"screenWithAudio":false}"""
+                    connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+                    val code = connection.responseCode
+                    if (code !in 200..299) {
+                        Log.w("OndaCall", "Media state returned HTTP $code.")
+                    }
+                } catch (error: Exception) {
+                    Log.w("OndaCall", "Media state update failed.", error)
+                } finally {
+                    connection?.disconnect()
+                }
             }
         }
     }

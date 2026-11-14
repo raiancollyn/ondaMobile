@@ -42,6 +42,7 @@ public class MainActivity extends BridgeActivity {
     private int appliedTopInset = -1;
     private int appliedBottomInset = -1;
     private TextureViewRenderer cameraPreview;
+    private boolean resumeCameraAfterStop;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -344,9 +345,19 @@ public class MainActivity extends BridgeActivity {
     }
 
     @Override
-    public void onStop() {
-        super.onStop();
+    public void onResume() {
+        super.onResume();
+        if (resumeCameraAfterStop) {
+            resumeCameraAfterStop = false;
+            CallService.setCamera(true);
+        }
+    }
+
+    @Override
+    public void onPause() {
+        super.onPause();
         if (!isChangingConfigurations()) {
+            resumeCameraAfterStop = CallService.isCameraEnabled();
             CallService.setCamera(false);
         }
     }
