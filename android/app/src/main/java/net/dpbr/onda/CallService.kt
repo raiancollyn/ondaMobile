@@ -608,13 +608,12 @@ class CallService : LifecycleService() {
             return false
         }
 
-        val camera = cameraX()
-        if (camera != null) {
-            return camera.cameraInfo.hasFlashUnit()
+        val id = activeCameraId
+        if (id != null && cameraFacing(id) == "environment" && cameraHasFlash(id)) {
+            return true
         }
 
-        val id = activeCameraId ?: return false
-        return cameraFacing(id) == "environment" && cameraHasFlash(id)
+        return cameraX()?.cameraInfo?.hasFlashUnit() == true
     }
 
     private fun switchCameraTo(deviceId: String?): Boolean {
