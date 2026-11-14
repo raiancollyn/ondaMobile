@@ -38,6 +38,7 @@ class CallService : Service() {
         const val ACTION_START = "net.dpbr.onda.action.START_CALL"
         const val ACTION_STOP = "net.dpbr.onda.action.STOP_CALL"
         const val ACTION_TOGGLE_MIC = "net.dpbr.onda.action.TOGGLE_MIC"
+        const val ACTION_DISABLE_CAMERA = "net.dpbr.onda.action.DISABLE_CAMERA"
         const val EXTRA_URL = "net.dpbr.onda.extra.LIVEKIT_URL"
         const val EXTRA_TOKEN = "net.dpbr.onda.extra.LIVEKIT_TOKEN"
         const val EXTRA_ROOM_ID = "net.dpbr.onda.extra.ROOM_ID"
@@ -146,6 +147,12 @@ class CallService : Service() {
         if (intent?.action == ACTION_TOGGLE_MIC) {
             startForegroundCompat(buildNotification(notificationText()))
             setMicrophoneEnabled(!microphoneEnabled)
+            return START_NOT_STICKY
+        }
+
+        if (intent?.action == ACTION_DISABLE_CAMERA) {
+            startForegroundCompat(buildNotification(notificationText()))
+            setCameraEnabled(false)
             return START_NOT_STICKY
         }
 
@@ -625,7 +632,15 @@ class CallService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+        val cameraIntent = Intent(this, CallService::class.java).setAction(ACTION_DISABLE_CAMERA)
+        val cameraPending = PendingIntent.getService(
+            this,
+            3,
+            cameraIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_menu_call)
             .setContentTitle("Onda")
             .setContentText(text)
@@ -634,6 +649,12 @@ class CallService : Service() {
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .addAction(0, if (microphoneEnabled) "Silenciar" else "Ativar", micPending)
+
+        if (cameraEnabled) {
+            builder.addAction(0, "Desligar câmera", cameraPending)
+        }
+
+        return builder
             .addAction(0, "Encerrar", stopPending)
             .build()
     }
