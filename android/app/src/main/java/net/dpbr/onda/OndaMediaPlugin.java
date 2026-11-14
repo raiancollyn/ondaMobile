@@ -260,6 +260,16 @@ public class OndaMediaPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void setScreenQuality(PluginCall call) {
+        int width = call.getInt("width", 1920);
+        int height = call.getInt("height", 1080);
+        int frameRate = call.getInt("frameRate", 30);
+        int bitrate = call.getInt("bitrateKbps", 4000);
+        CallService.setScreenShareQuality(width, height, frameRate, bitrate);
+        call.resolve(new JSObject().put("applied", true));
+    }
+
+    @PluginMethod
     public void setCameraQuality(PluginCall call) {
         int width = call.getInt("width", 1280);
         int height = call.getInt("height", 720);

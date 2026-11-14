@@ -150,6 +150,11 @@ class CallService : LifecycleService() {
         fun isScreenShareEnabled(): Boolean = current?.screenShareEnabled ?: false
 
         @JvmStatic
+        fun setScreenShareQuality(width: Int, height: Int, frameRate: Int, bitrateKbps: Int) {
+            current?.updateScreenShareQuality(width, height, frameRate, bitrateKbps)
+        }
+
+        @JvmStatic
         fun getCameraDevices(): List<Map<String, Any?>> = current?.cameraDevices() ?: emptyList()
 
         @JvmStatic
@@ -216,6 +221,7 @@ class CallService : LifecycleService() {
     private var screenShareEnabled = false
     private var screenShareJob: Job? = null
     private var screenShareResultData: Intent? = null
+    private var screenShareResultCode = 0
     private var localVideoTrack: LocalVideoTrack? = null
     private var cameraPosition = CameraPosition.FRONT
     private var activeCameraId: String? = null
@@ -774,6 +780,13 @@ class CallService : LifecycleService() {
             videoEncoding = VideoEncoding(bitrate * 1000, fps),
             simulcast = false
         )
+        target.localParticipant.screenShareTrackCaptureDefaults = LocalVideoTrackOptions(
+            captureParams = VideoCaptureParameter(width, height, fps, false)
+        )
+        target.localParticipant.screenShareTrackPublishDefaults = VideoTrackPublishDefaults(
+            videoEncoding = VideoEncoding(bitrate * 1000, fps),
+            simulcast = false
+        )
         Log.i("OndaCall", "Screen quality: ${width}x${height}@${fps} ${bitrate}kbps")
     }
 
@@ -1077,6 +1090,7 @@ class CallService : LifecycleService() {
         }
 
         screenShareResultData = resultData
+        screenShareResultCode = resultCode
         screenShareJob?.cancel()
         screenShareJob = scope.launch {
             try {
@@ -1120,8 +1134,36 @@ class CallService : LifecycleService() {
         }
     }
 
-    private fun stopScreenShare() {
-        if (!screenShareEnabled) {
+    private fun updateScreenShareQuality(width: Int, height: Int, frameRate: Int, bitrateKbps: Int) {
+        screenCaptureWidth = width
+        screenCaptureHeight = height
+        screenFrameRate = frameRate
+        screenBitrateKbps = bitrateKbps
+        room?.let { applyScreenShareQuality(it) }
+
+        if (screenShareEnabled) {
+            restartScreenShareForQuality()
+        }
+    }
+
+    private fun restartScreenShareForQuality() {
+        val resultData = screenShareResultData ?: return
+        val resultCode = screenShareResultCode
+        screenShareJob?.cancel()
+        screenShareJob = scope.launch {
+            try {
+                room?.localParticipant?.setScreenShareEnabled(false)
+            } catch (error: Exception) {
+                Log.w("OndaCall", "Could not restart screen capture.", error)
+            }
+            delay(250)
+            screenShareEnabled = false
+            screenShareJob = null
+            startScreenShare(resultCode, resultData)
+        }
+    }
+
+    private fun stopScreenShare() {        if (!screenShareEnabled) {
             screenShareResultData = null
             return
         }

@@ -37,6 +37,7 @@ public class MainActivity extends BridgeActivity {
     private static final int LIGHT_SCRIM = Color.rgb(247, 243, 235);
     private boolean bridgeProbeScheduled;
     private String pendingDeepLinkUrl;
+    private String lastLoadedRoomUrl;
     private boolean startCallWhenGranted;
     private String pendingCallUrl;
     private String pendingCallToken;
@@ -298,6 +299,7 @@ public class MainActivity extends BridgeActivity {
         setIntent(intent);
         handleDeepLink(intent);
         CallService.validateCurrentRoom();
+        openActiveRoomIfNeeded();
     }
 
     private void handleDeepLink(Intent intent) {
@@ -338,8 +340,35 @@ public class MainActivity extends BridgeActivity {
             return;
         }
 
+        lastLoadedRoomUrl = pendingDeepLinkUrl;
         getBridge().getWebView().loadUrl(pendingDeepLinkUrl);
         pendingDeepLinkUrl = null;
+    }
+
+    private void openActiveRoomIfNeeded() {
+        if (pendingDeepLinkUrl != null) {
+            return;
+        }
+
+        String room = CallService.getCurrentRoomId();
+        if (room == null || room.isEmpty() ||
+            getBridge() == null || getBridge().getWebView() == null) {
+            return;
+        }
+
+        String encodedRoom = Uri.encode(room);
+        String currentUrl = getBridge().getWebView().getUrl();
+        if (currentUrl != null && currentUrl.contains("/sala/" + encodedRoom)) {
+            return;
+        }
+
+        String target = "https://onda.dpbr.net/sala/" + encodedRoom;
+        if (target.equals(lastLoadedRoomUrl)) {
+            return;
+        }
+
+        lastLoadedRoomUrl = target;
+        getBridge().getWebView().loadUrl(target);
     }
 
     @Override
@@ -348,6 +377,7 @@ public class MainActivity extends BridgeActivity {
 
         loadPendingDeepLink();
         CallService.validateCurrentRoom();
+        openActiveRoomIfNeeded();
 
         if (getBridge() == null || getBridge().getWebView() == null) {
             return;
