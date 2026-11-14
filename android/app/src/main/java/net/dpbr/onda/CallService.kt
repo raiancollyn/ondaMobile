@@ -116,6 +116,8 @@ class CallService : Service() {
     private var networkCallbackRegisteredAt = 0L
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var reconnectJob: Job? = null
+    private var speakingJob: Job? = null
+    private var localSpeaking = false
     private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onCreate() {
@@ -196,6 +198,7 @@ class CallService : Service() {
                 updateNotification()
                 startPresenceHeartbeat();
                 postMediaState()
+                startSpeakingMonitor()
                 registerNetworkCallback()
                 Log.i("OndaCall", "Connected to LiveKit room and microphone enabled.")
             } catch (error: Exception) {
@@ -561,6 +564,60 @@ class CallService : Service() {
                     }
                 } catch (error: Exception) {
                     Log.w("OndaCall", "Media state update failed.", error)
+                } finally {
+                    connection?.disconnect()
+                }
+            }
+        }
+    }
+
+    private fun startSpeakingMonitor() {
+        if (speakingJob != null) {
+            return
+        }
+
+        speakingJob = scope.launch {
+            while (isActive) {
+                val participant = room?.localParticipant
+                val speaking = microphoneEnabled &&
+                    participant != null &&
+                    (participant.isSpeaking || participant.audioLevel > 0.02f)
+
+                if (speaking != localSpeaking) {
+                    localSpeaking = speaking
+                    postSpeakingState(speaking)
+                }
+
+                delay(200)
+            }
+        }
+    }
+
+    private fun postSpeakingState(speaking: Boolean) {
+        val base = presenceUrl?.trimEnd('/') ?: return
+        val room = roomId ?: return
+        val guest = guestId ?: return
+        if (base.isBlank() || room.isBlank() || guest.isBlank()) {
+            return
+        }
+
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                var connection: HttpURLConnection? = null
+                try {
+                    connection = (URL("$base/api/presence/speaking").openConnection() as HttpURLConnection).apply {
+                        requestMethod = "POST"
+                        connectTimeout = 4000
+                        readTimeout = 4000
+                        doOutput = true
+                        setRequestProperty("Content-Type", "application/json")
+                    }
+                    val body =
+                        """{"roomId":"$room","guestId":"$guest","speaking":$speaking}"""
+                    connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+                    connection.responseCode
+                } catch (error: Exception) {
+                    Log.w("OndaCall", "Speaking state update failed.", error)
                 } finally {
                     connection?.disconnect()
                 }
