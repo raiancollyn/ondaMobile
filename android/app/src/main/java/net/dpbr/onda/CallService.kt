@@ -191,6 +191,8 @@ class CallService : LifecycleService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        super.onStartCommand(intent, flags, startId)
+
         if (intent?.action == ACTION_STOP) {
             stopSelf()
             return START_NOT_STICKY
@@ -485,6 +487,7 @@ class CallService : LifecycleService() {
                         activeCameraId = findCameraId(CameraPosition.FRONT)
                     }
                     Log.i("OndaCall", "Camera track available: ${track != null}")
+
                     attachCameraRenderer(cameraPreview)
                     postMediaState()
                     startForegroundCompat(buildNotification(notificationText()))
