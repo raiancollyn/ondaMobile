@@ -772,7 +772,6 @@ class CallService : LifecycleService() {
             try {
                 Log.i("OndaCall", "Reasserting camera after app resume.")
                 clearTorchMode()
-                cameraEnabled = false
                 participant.setCameraEnabled(false)
                 delay(400)
 
@@ -780,7 +779,10 @@ class CallService : LifecycleService() {
                     return@launch
                 }
 
-                cameraEnabled = true
+                if (!cameraEnabled) {
+                    return@launch
+                }
+
                 participant.setCameraEnabled(true)
 
                 var track: LocalVideoTrack? = null
