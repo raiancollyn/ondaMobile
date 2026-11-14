@@ -157,6 +157,7 @@ class CallService : LifecycleService() {
     private var cameraPosition = CameraPosition.FRONT
     private var activeCameraId: String? = null
     private var torchEnabled = false
+    private var torchPreference = false
     private var torchResetJob: Job? = null
     private var cameraProvider: CameraCapturerUtils.CameraProvider? = null
     private var cameraRestartInProgress = false
@@ -164,6 +165,9 @@ class CallService : LifecycleService() {
     private var cameraCaptureHeight = 720
     private var cameraFrameRate = 30
     private var cameraBitrateKbps = 1500
+    private val cameraPreferences by lazy {
+        getSharedPreferences("onda_camera", MODE_PRIVATE)
+    }
     private var cameraPreview: TextureViewRenderer? = null
     private var cameraPreviewInitialized = false
     private var networkCallbackRegisteredAt = 0L
@@ -176,10 +180,35 @@ class CallService : LifecycleService() {
     override fun onCreate() {
         super.onCreate()
         current = this
+        loadCameraPreferences()
         setupCameraX()
         pendingCameraPreview?.let { attachCameraRenderer(it) }
         acquireWakeLock()
         createNotificationChannel()
+    }
+
+    private fun loadCameraPreferences() {
+        val prefs = cameraPreferences
+        cameraPosition = if (prefs.getString("position", "front") == "back") {
+            CameraPosition.BACK
+        } else {
+            CameraPosition.FRONT
+        }
+        activeCameraId = prefs.getString("id", null)?.takeIf { it.isNotBlank() }
+        torchPreference = prefs.getBoolean("torch", false) && cameraPosition == CameraPosition.BACK
+        torchEnabled = false
+        Log.i(
+            "OndaCall",
+            "Camera preference loaded: ${activeCameraId ?: "auto"} (${cameraPosition}), torch=$torchEnabled"
+        )
+    }
+
+    private fun saveCameraPreferences() {
+        cameraPreferences.edit()
+            .putString("id", activeCameraId ?: "")
+            .putString("position", if (cameraPosition == CameraPosition.BACK) "back" else "front")
+            .putBoolean("torch", torchPreference)
+            .apply()
     }
 
     private fun setupCameraX() {
@@ -272,10 +301,12 @@ class CallService : LifecycleService() {
         val bitrate = cameraBitrateKbps.coerceIn(100, 20_000)
 
         target.videoTrackCaptureDefaults = LocalVideoTrackOptions(
-            captureParams = VideoCaptureParameter(width, height, fps, true)
+            position = cameraPosition,
+            captureParams = VideoCaptureParameter(width, height, fps, false)
         )
         target.videoTrackPublishDefaults = VideoTrackPublishDefaults(
-            videoEncoding = VideoEncoding(bitrate * 1000, fps)
+            videoEncoding = VideoEncoding(bitrate * 1000, fps),
+            simulcast = false
         )
         Log.i("OndaCall", "Camera quality: ${width}x${height}@${fps} ${bitrate}kbps")
     }
@@ -377,6 +408,7 @@ class CallService : LifecycleService() {
                     localVideoTrack = newRoom.localParticipant
                         .getTrackPublication(Track.Source.CAMERA)
                         ?.track as? LocalVideoTrack
+                    restoreCameraSelection(localVideoTrack)
                     attachCameraRenderer(cameraPreview)
                 } catch (cameraError: Exception) {
                     Log.w("OndaCall", "Could not restore camera after reconnect.", cameraError)
@@ -502,6 +534,44 @@ class CallService : LifecycleService() {
         else -> type
     }
 
+    private fun restoreCameraSelection(track: LocalVideoTrack?) {
+        if (track == null) {
+            return
+        }
+
+        val desiredFacing = if (cameraPosition == CameraPosition.BACK) "environment" else "user"
+        val desiredId = activeCameraId
+            ?.takeIf { cameraFacing(it) == desiredFacing }
+            ?: findCameraId(cameraPosition)
+        activeCameraId = desiredId
+
+        if (desiredId != null) {
+            try {
+                track.switchCamera(desiredId, cameraPosition)
+            } catch (error: Exception) {
+                Log.w("OndaCall", "Could not restore selected camera.", error)
+            }
+        }
+
+        saveCameraPreferences()
+        val restoreTorch = torchPreference
+        if (restoreTorch && cameraPosition == CameraPosition.BACK) {
+            torchEnabled = false
+            scope.launch {
+                for (attempt in 0 until 5) {
+                    delay(350)
+                    if (!cameraEnabled || cameraPosition != CameraPosition.BACK) {
+                        return@launch
+                    }
+                    if (setTorchEnabled(true)) {
+                        Log.i("OndaCall", "Torch preference restored.")
+                        return@launch
+                    }
+                }
+            }
+        }
+    }
+
     private fun setCameraEnabled(enabled: Boolean) {
         if (enabled == cameraEnabled && (!enabled || localVideoTrack != null)) {
             if (enabled) {
@@ -532,15 +602,7 @@ class CallService : LifecycleService() {
                         delay(100)
                     }
                     localVideoTrack = track
-                    if (track != null && activeCameraId != null) {
-                        try {
-                            track.switchCamera(activeCameraId, cameraPosition)
-                        } catch (error: Exception) {
-                            Log.w("OndaCall", "Could not restore selected camera.", error)
-                        }
-                    } else {
-                        activeCameraId = findCameraId(CameraPosition.FRONT)
-                    }
+                    restoreCameraSelection(track)
                     Log.i("OndaCall", "Camera track available: ${track != null}")
 
                     attachCameraRenderer(cameraPreview)
@@ -696,6 +758,9 @@ class CallService : LifecycleService() {
             activeCameraId = target
             cameraPosition = facing
             torchEnabled = false
+            torchPreference = false
+            room?.let { applyCameraQuality(it) }
+            saveCameraPreferences()
             Log.i("OndaCall", "Camera switched to $target ($facing).")
             true
         } catch (error: Exception) {
@@ -722,6 +787,8 @@ class CallService : LifecycleService() {
             return try {
                 camera.cameraControl.enableTorch(enabled)
                 torchEnabled = enabled
+                torchPreference = enabled
+                saveCameraPreferences()
                 Log.i("OndaCall", "CameraX torch enabled: $enabled")
                 true
             } catch (error: Exception) {
@@ -739,6 +806,8 @@ class CallService : LifecycleService() {
         return try {
             manager.setTorchMode(id, enabled)
             torchEnabled = enabled
+            torchPreference = enabled
+            saveCameraPreferences()
             Log.i("OndaCall", "Torch enabled: $enabled")
             true
         } catch (error: Exception) {
@@ -789,7 +858,11 @@ class CallService : LifecycleService() {
     private fun clearTorchMode() {
         torchResetJob?.cancel()
         torchResetJob = null
+        val wasEnabled = torchEnabled
         torchEnabled = false
+        if (!wasEnabled) {
+            return
+        }
 
         val camera = cameraX()
         if (camera != null) {
@@ -845,13 +918,7 @@ class CallService : LifecycleService() {
                 }
 
                 localVideoTrack = track
-                if (track != null && activeCameraId != null) {
-                    try {
-                        track.switchCamera(activeCameraId, cameraPosition)
-                    } catch (error: Exception) {
-                        Log.w("OndaCall", "Could not restore camera after resume.", error)
-                    }
-                }
+                restoreCameraSelection(track)
 
                 attachCameraRenderer(cameraPreview)
                 postMediaState()
