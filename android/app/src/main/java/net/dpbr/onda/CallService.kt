@@ -874,7 +874,7 @@ class CallService : LifecycleService() {
                 postPresence("native")
                 postMediaState()
                 postSpeakingState(localSpeaking)
-                delay(30_000)
+                delay(10_000)
             }
         }
     }
