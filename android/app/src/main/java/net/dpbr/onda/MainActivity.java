@@ -240,6 +240,7 @@ public class MainActivity extends BridgeActivity {
         super.onNewIntent(intent);
         setIntent(intent);
         handleDeepLink(intent);
+        CallService.validateCurrentRoom();
     }
 
     private void handleDeepLink(Intent intent) {
@@ -255,14 +256,18 @@ public class MainActivity extends BridgeActivity {
             return;
         }
 
+        String roomCode = segments.get(0);
         StringBuilder target = new StringBuilder("https://onda.dpbr.net/sala/")
-            .append(Uri.encode(segments.get(0)));
+            .append(Uri.encode(roomCode));
         String handoff = data.getQueryParameter("handoff");
         if (handoff != null && !handoff.isEmpty()) {
             target.append("?handoff=").append(Uri.encode(handoff));
         }
 
-        CallService.stopCurrentCall();
+        String currentRoom = CallService.getCurrentRoomId();
+        if (currentRoom == null || !currentRoom.equalsIgnoreCase(roomCode)) {
+            CallService.stopCurrentCall();
+        }
         pendingDeepLinkUrl = target.toString();
         loadPendingDeepLink();
     }
@@ -285,6 +290,7 @@ public class MainActivity extends BridgeActivity {
         super.onStart();
 
         loadPendingDeepLink();
+        CallService.validateCurrentRoom();
 
         if (getBridge() == null || getBridge().getWebView() == null) {
             return;

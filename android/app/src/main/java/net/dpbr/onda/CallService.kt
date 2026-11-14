@@ -17,6 +17,7 @@ import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.net.ConnectivityManager
 import android.net.Network
+import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -52,6 +53,7 @@ import livekit.org.webrtc.CameraXHelper
 import livekit.org.webrtc.getCameraX
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 
 class CallService : LifecycleService() {
     companion object {
@@ -96,6 +98,14 @@ class CallService : LifecycleService() {
         @JvmStatic
         fun stopCurrentCall() {
             current?.stopSelf()
+        }
+
+        @JvmStatic
+        fun getCurrentRoomId(): String? = current?.roomId
+
+        @JvmStatic
+        fun validateCurrentRoom() {
+            current?.validateRoomAndStopIfMissing()
         }
 
         @JvmStatic
@@ -210,6 +220,7 @@ class CallService : LifecycleService() {
     private var networkCallbackRegisteredAt = 0L
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var reconnectJob: Job? = null
+    private var roomValidationJob: Job? = null
     private var speakingJob: Job? = null
     private var localSpeaking = false
     private var wakeLock: PowerManager.WakeLock? = null
@@ -1402,17 +1413,80 @@ class CallService : LifecycleService() {
         localVideoTrack = null
     }
 
+    private fun validateRoomAndStopIfMissing() {
+        val room = roomId ?: return
+        val base = presenceUrl?.trimEnd('/') ?: return
+        if (room.isBlank() || base.isBlank() || roomValidationJob?.isActive == true) {
+            return
+        }
+
+        roomValidationJob = scope.launch {
+            delay(250)
+            when (queryRoomExists(base, room)) {
+                false -> {
+                    Log.i("OndaCall", "Room $room no longer exists; ending the call.")
+                    stopSelf()
+                }
+                else -> Unit
+            }
+        }
+    }
+
+    private suspend fun queryRoomExists(base: String, room: String): Boolean? =
+        withContext(Dispatchers.IO) {
+            var connection: HttpURLConnection? = null
+            try {
+                val encodedRoom = URLEncoder.encode(room, "UTF-8")
+                connection = (URL("$base/api/rooms/$encodedRoom/exists").openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 4000
+                    readTimeout = 4000
+                }
+                val code = connection.responseCode
+                if (code !in 200..299) {
+                    return@withContext null
+                }
+
+                val body = connection.inputStream.bufferedReader().use { it.readText() }
+                    .replace(" ", "")
+                    .replace("\n", "")
+                    .replace("\r", "")
+                when {
+                    body.contains("\"exists\":true") -> true
+                    body.contains("\"exists\":false") -> false
+                    else -> null
+                }
+            } catch (error: Exception) {
+                Log.w("OndaCall", "Could not validate room existence.", error)
+                null
+            } finally {
+                connection?.disconnect()
+            }
+        }
+
     private fun startPresenceHeartbeat() {
         if (roomId.isNullOrBlank() || guestId.isNullOrBlank() || presenceUrl.isNullOrBlank()) {
             return
         }
 
         heartbeatJob?.cancel()
+        val base = presenceUrl!!.trimEnd('/')
+        val room = roomId!!
         heartbeatJob = scope.launch {
+            var validationTicks = 0
             while (isActive) {
                 postPresence("native")
                 postMediaState()
                 postSpeakingState(localSpeaking)
+                validationTicks += 1
+                if (validationTicks >= 3) {
+                    validationTicks = 0
+                    if (queryRoomExists(base, room) == false) {
+                        Log.i("OndaCall", "Room $room no longer exists; ending the call.")
+                        stopSelf()
+                        return@launch
+                    }
+                }
                 delay(10_000)
             }
         }
@@ -1580,6 +1654,10 @@ class CallService : LifecycleService() {
 
     private fun buildNotification(text: String): Notification {
         val openIntent = Intent(this, MainActivity::class.java).apply {
+            action = Intent.ACTION_VIEW
+            roomId?.takeIf { it.isNotBlank() }?.let { code ->
+                data = Uri.parse("onda://sala/${Uri.encode(code)}")
+            }
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
         val openPending = PendingIntent.getActivity(
