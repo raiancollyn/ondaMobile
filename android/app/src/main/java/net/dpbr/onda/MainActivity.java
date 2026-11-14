@@ -6,6 +6,7 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.Gravity;
@@ -20,7 +21,7 @@ import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 import com.getcapacitor.BridgeActivity;
-import io.livekit.android.renderer.SurfaceViewRenderer;
+import io.livekit.android.renderer.TextureViewRenderer;
 import livekit.org.webrtc.RendererCommon;
 
 public class MainActivity extends BridgeActivity {
@@ -41,7 +42,7 @@ public class MainActivity extends BridgeActivity {
     private boolean insetsListenerInstalled;
     private int appliedTopInset = -1;
     private int appliedBottomInset = -1;
-    private SurfaceViewRenderer cameraPreview;
+    private TextureViewRenderer cameraPreview;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -303,12 +304,16 @@ public class MainActivity extends BridgeActivity {
             return;
         }
 
-        cameraPreview = new SurfaceViewRenderer(this);
+        cameraPreview = new TextureViewRenderer(this);
         cameraPreview.setVisibility(View.GONE);
         cameraPreview.setMirror(true);
         cameraPreview.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL);
         cameraPreview.setEnableHardwareScaler(true);
-        cameraPreview.setZOrderMediaOverlay(true);
+        GradientDrawable previewBackground = new GradientDrawable();
+        previewBackground.setColor(Color.BLACK);
+        previewBackground.setCornerRadius(dp(14));
+        cameraPreview.setBackground(previewBackground);
+        cameraPreview.setClipToOutline(true);
 
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(dp(116), dp(154));
         params.gravity = Gravity.BOTTOM | Gravity.END;

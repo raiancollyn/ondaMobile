@@ -15,7 +15,7 @@ import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import io.livekit.android.LiveKit
-import io.livekit.android.renderer.SurfaceViewRenderer
+import io.livekit.android.renderer.TextureViewRenderer
 import io.livekit.android.room.Room
 import io.livekit.android.room.track.LocalVideoTrack
 import io.livekit.android.room.track.Track
@@ -67,7 +67,7 @@ class CallService : Service() {
         fun isCameraEnabled(): Boolean = current?.cameraEnabled ?: false
 
         @JvmStatic
-        fun attachCameraPreview(renderer: SurfaceViewRenderer?) {
+        fun attachCameraPreview(renderer: TextureViewRenderer?) {
             current?.attachCameraRenderer(renderer)
         }
 
@@ -102,7 +102,7 @@ class CallService : Service() {
     private var microphoneEnabled = true
     private var cameraEnabled = false
     private var localVideoTrack: LocalVideoTrack? = null
-    private var cameraPreview: SurfaceViewRenderer? = null
+    private var cameraPreview: TextureViewRenderer? = null
     private var cameraPreviewInitialized = false
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var reconnectJob: Job? = null
@@ -404,7 +404,7 @@ class CallService : Service() {
         }
     }
 
-    private fun attachCameraRenderer(renderer: SurfaceViewRenderer?) {
+    private fun attachCameraRenderer(renderer: TextureViewRenderer?) {
         if (cameraPreview !== renderer) {
             val previous = cameraPreview
             if (previous != null) {
