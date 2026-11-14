@@ -10,13 +10,21 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
+import android.media.AudioAttributes
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.net.ConnectivityManager
 import android.net.Network
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Log
 import androidx.camera.core.Camera
+import androidx.camera.core.CameraState
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.LifecycleService
 import io.livekit.android.LiveKit
@@ -205,12 +213,26 @@ class CallService : LifecycleService() {
     private var speakingJob: Job? = null
     private var localSpeaking = false
     private var wakeLock: PowerManager.WakeLock? = null
+    private var audioFocusRequest: AudioFocusRequest? = null
+    private var audioFocusListener: AudioManager.OnAudioFocusChangeListener? = null
+    private var audioDeviceCallback: AudioDeviceCallback? = null
+    private var preferredAudioRouteId: String? = null
+    private var lastAudioRouteId: String? = null
+    private var microphoneSuppressedByFocus = false
+    private var audioRoutingJob: Job? = null
+    private var cameraAvailabilityCallback: CameraManager.AvailabilityCallback? = null
+    private val cameraUnavailableIds = mutableSetOf<String>()
+    private var cameraInterrupted = false
+    private var cameraRecoveryJob: Job? = null
+    private var cameraAvailabilityJob: Job? = null
 
     override fun onCreate() {
         super.onCreate()
         current = this
         loadCameraPreferences()
         setupCameraX()
+        registerAudioCallbacks()
+        registerCameraAvailabilityCallback()
         pendingCameraPreview?.let { attachCameraRenderer(it) }
         acquireWakeLock()
         createNotificationChannel()
@@ -238,6 +260,313 @@ class CallService : LifecycleService() {
             .putString("position", if (cameraPosition == CameraPosition.BACK) "back" else "front")
             .putBoolean("torch", torchPreference)
             .apply()
+    }
+
+    private fun audioManager(): AudioManager? = getSystemService(AudioManager::class.java)
+
+    private fun registerAudioCallbacks() {
+        if (audioDeviceCallback != null) {
+            return
+        }
+
+        val manager = audioManager() ?: return
+        val callback = object : AudioDeviceCallback() {
+            override fun onAudioDevicesAdded(addedDevices: Array<AudioDeviceInfo>?) {
+                scheduleAudioRouteRefresh("device added", 450)
+            }
+
+            override fun onAudioDevicesRemoved(removedDevices: Array<AudioDeviceInfo>?) {
+                scheduleAudioRouteRefresh("device removed", 450)
+            }
+        }
+
+        try {
+            manager.registerAudioDeviceCallback(callback, Handler(Looper.getMainLooper()))
+            audioDeviceCallback = callback
+            Log.i("OndaCall", "Audio device callbacks registered.")
+        } catch (error: Exception) {
+            Log.w("OndaCall", "Could not register audio device callbacks.", error)
+        }
+    }
+
+    private fun unregisterAudioCallbacks() {
+        val manager = audioManager()
+        val callback = audioDeviceCallback
+        if (manager != null && callback != null) {
+            try {
+                manager.unregisterAudioDeviceCallback(callback)
+            } catch (error: Exception) {
+                Log.w("OndaCall", "Could not unregister audio device callbacks.", error)
+            }
+        }
+        audioDeviceCallback = null
+        audioRoutingJob?.cancel()
+        audioRoutingJob = null
+    }
+
+    private fun requestCallAudioFocus() {
+        if (audioFocusListener != null) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && audioFocusRequest == null) {
+                requestAudioFocusRequest()
+            }
+            return
+        }
+
+        val manager = audioManager() ?: return
+        val listener = AudioManager.OnAudioFocusChangeListener { change ->
+            handleAudioFocusChange(change)
+        }
+        audioFocusListener = listener
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            requestAudioFocusRequest()
+        } else {
+            try {
+                manager.requestAudioFocus(
+                    listener,
+                    AudioManager.STREAM_VOICE_CALL,
+                    AudioManager.AUDIOFOCUS_GAIN
+                )
+            } catch (error: Exception) {
+                Log.w("OndaCall", "Could not request audio focus.", error)
+            }
+        }
+    }
+
+    private fun requestAudioFocusRequest() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            return
+        }
+
+        val manager = audioManager() ?: return
+        val listener = audioFocusListener ?: return
+        val attributes = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+            .build()
+        val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+            .setAudioAttributes(attributes)
+            .setAcceptsDelayedFocusGain(false)
+            .setOnAudioFocusChangeListener(listener)
+            .build()
+
+        try {
+            audioFocusRequest = request
+            manager.requestAudioFocus(request)
+            Log.i("OndaCall", "Audio focus requested for the call.")
+        } catch (error: Exception) {
+            audioFocusRequest = null
+            Log.w("OndaCall", "Could not request audio focus.", error)
+        }
+    }
+
+    private fun abandonCallAudioFocus() {
+        val manager = audioManager()
+        val request = audioFocusRequest
+        val listener = audioFocusListener
+        if (manager != null) {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && request != null) {
+                    manager.abandonAudioFocusRequest(request)
+                } else if (listener != null) {
+                    manager.abandonAudioFocus(listener)
+                }
+            } catch (error: Exception) {
+                Log.w("OndaCall", "Could not abandon audio focus.", error)
+            }
+        }
+        audioFocusRequest = null
+        audioFocusListener = null
+        microphoneSuppressedByFocus = false
+    }
+
+    private fun handleAudioFocusChange(change: Int) {
+        Log.i("OndaCall", "Audio focus changed: $change")
+        when (change) {
+            AudioManager.AUDIOFOCUS_LOSS,
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                microphoneSuppressedByFocus = true
+                scope.launch {
+                    try {
+                        room?.localParticipant?.setMicrophoneEnabled(false)
+                        postMediaState()
+                    } catch (error: Exception) {
+                        Log.w("OndaCall", "Could not pause microphone for audio focus loss.", error)
+                    }
+                }
+            }
+
+            AudioManager.AUDIOFOCUS_GAIN -> {
+                if (microphoneSuppressedByFocus && microphoneEnabled) {
+                    scope.launch {
+                        try {
+                            room?.localParticipant?.setMicrophoneEnabled(true)
+                            postMediaState()
+                        } catch (error: Exception) {
+                            Log.w("OndaCall", "Could not restore microphone after audio focus.", error)
+                        }
+                    }
+                }
+                microphoneSuppressedByFocus = false
+                scheduleAudioRouteRefresh("audio focus regained", 350)
+            }
+
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                // The call remains audible; no route change is necessary.
+            }
+        }
+    }
+
+    private fun scheduleAudioRouteRefresh(reason: String, delayMs: Long = 350) {
+        audioRoutingJob?.cancel()
+        audioRoutingJob = scope.launch {
+            delay(delayMs)
+            applyBestAudioRoute(reason)
+        }
+    }
+
+    private fun applyBestAudioRoute(reason: String) {
+        val handler = room?.audioSwitchHandler ?: return
+        val devices = handler.availableAudioDevices
+        if (devices.isEmpty()) {
+            return
+        }
+
+        val available = devices.map { it.javaClass.simpleName }.toSet()
+        val current = handler.selectedAudioDevice?.javaClass?.simpleName
+        val preferred = preferredAudioRouteId?.takeIf { available.contains(it) }
+        lastAudioRouteId = current
+        val preferredIsHeadset =
+            preferred == "BluetoothHeadset" || preferred == "WiredHeadset"
+
+        val target = when {
+            preferredIsHeadset && preferred != current -> preferred
+            available.contains("BluetoothHeadset") && current != "BluetoothHeadset" -> "BluetoothHeadset"
+            available.contains("WiredHeadset") && current != "WiredHeadset" -> "WiredHeadset"
+            preferred != null && preferred != current -> preferred
+            current != null && available.contains(current) -> current
+            available.contains("Earpiece") -> "Earpiece"
+            available.contains("Speakerphone") -> "Speakerphone"
+            else -> null
+        }
+
+        if (target == null || target == current) {
+            return
+        }
+
+        val device = devices.firstOrNull { it.javaClass.simpleName == target } ?: return
+        try {
+            handler.selectDevice(device)
+            lastAudioRouteId = target
+            Log.i("OndaCall", "Audio route changed after $reason: $target")
+        } catch (error: Exception) {
+            Log.w("OndaCall", "Could not change audio route to $target.", error)
+        }
+    }
+
+    private fun registerCameraAvailabilityCallback() {
+        if (cameraAvailabilityCallback != null) {
+            return
+        }
+
+        val manager = cameraManager() ?: return
+        val callback = object : CameraManager.AvailabilityCallback() {
+            override fun onCameraUnavailable(cameraId: String) {
+                cameraUnavailableIds.add(cameraId)
+                if (!cameraEnabled) {
+                    return
+                }
+
+                val active = activeCameraId
+                val matchesActive = (active != null && active == cameraId) ||
+                    (active == null && cameraFacing(cameraId) != null)
+                if (!matchesActive) {
+                    return
+                }
+
+                // Opening our own camera also triggers this callback on some
+                // devices. Inspect CameraX state before treating it as a
+                // takeover by another application.
+                cameraAvailabilityJob?.cancel()
+                cameraAvailabilityJob = scope.launch {
+                    delay(400)
+                    if (!cameraEnabled || !cameraUnavailableIds.contains(cameraId)) {
+                        return@launch
+                    }
+
+                    val state = try {
+                        cameraX()?.cameraInfo?.cameraState?.value?.type
+                    } catch (error: Exception) {
+                        Log.w("OndaCall", "Could not read CameraX state.", error)
+                        null
+                    }
+
+                    if (state == CameraState.Type.OPEN ||
+                        state == CameraState.Type.OPENING ||
+                        state == CameraState.Type.PENDING_OPEN) {
+                        // This is our own camera; the availability callback
+                        // does not represent an external takeover.
+                        cameraUnavailableIds.remove(cameraId)
+                        return@launch
+                    }
+
+                    if (state == CameraState.Type.CLOSED ||
+                        state == CameraState.Type.CLOSING) {
+                        cameraInterrupted = true
+                        Log.w("OndaCall", "Camera $cameraId was taken or closed externally.")
+                    }
+                }
+            }
+
+            override fun onCameraAvailable(cameraId: String) {
+                cameraUnavailableIds.remove(cameraId)
+                if (!cameraInterrupted || !cameraEnabled) {
+                    return
+                }
+
+                val active = activeCameraId
+                if ((active != null && active == cameraId) || active == null) {
+                    cameraInterrupted = false
+                    scheduleCameraRecovery("camera released")
+                }
+            }
+        }
+
+        try {
+            manager.registerAvailabilityCallback(callback, Handler(Looper.getMainLooper()))
+            cameraAvailabilityCallback = callback
+        } catch (error: Exception) {
+            Log.w("OndaCall", "Could not register camera availability callback.", error)
+        }
+    }
+
+    private fun unregisterCameraAvailabilityCallback() {
+        val manager = cameraManager()
+        val callback = cameraAvailabilityCallback
+        if (manager != null && callback != null) {
+            try {
+                manager.unregisterAvailabilityCallback(callback)
+            } catch (error: Exception) {
+                Log.w("OndaCall", "Could not unregister camera availability callback.", error)
+            }
+        }
+        cameraAvailabilityCallback = null
+        cameraAvailabilityJob?.cancel()
+        cameraAvailabilityJob = null
+        cameraRecoveryJob?.cancel()
+        cameraRecoveryJob = null
+    }
+
+    private fun scheduleCameraRecovery(reason: String) {
+        cameraRecoveryJob?.cancel()
+        cameraRecoveryJob = scope.launch {
+            delay(700)
+            if (!cameraEnabled || cameraInterrupted || cameraRestartInProgress) {
+                return@launch
+            }
+            Log.i("OndaCall", "Recovering camera after $reason.")
+            restartCameraAfterResume()
+        }
     }
 
     private fun setupCameraX() {
@@ -382,6 +711,8 @@ class CallService : LifecycleService() {
                 applyCameraQuality(liveKitRoom)
                 liveKitRoom.connect(url, token)
                 liveKitRoom.localParticipant.setMicrophoneEnabled(microphoneEnabled)
+                requestCallAudioFocus()
+                scheduleAudioRouteRefresh("call connected", 0)
                 statusText = "Chamada de voz em andamento"
                 updateNotification()
                 startPresenceHeartbeat();
@@ -454,7 +785,11 @@ class CallService : LifecycleService() {
             room = newRoom
             applyCameraQuality(newRoom)
             newRoom.connect(url, token)
-            newRoom.localParticipant.setMicrophoneEnabled(microphoneEnabled)
+            newRoom.localParticipant.setMicrophoneEnabled(
+                microphoneEnabled && !microphoneSuppressedByFocus
+            )
+            requestCallAudioFocus()
+            scheduleAudioRouteRefresh("call reconnected", 350)
             cameraPreviewInitialized = false
             if (cameraEnabled) {
                 try {
@@ -482,6 +817,9 @@ class CallService : LifecycleService() {
 
     override fun onDestroy() {
         clearTorchMode()
+        unregisterAudioCallbacks()
+        abandonCallAudioFocus()
+        unregisterCameraAvailabilityCallback()
         try {
             stopForeground(STOP_FOREGROUND_REMOVE)
         } catch (error: Exception) {
@@ -581,6 +919,8 @@ class CallService : LifecycleService() {
             it.javaClass.simpleName.equals(id, ignoreCase = true)
         } ?: return false
         handler.selectDevice(device)
+        preferredAudioRouteId = id
+        lastAudioRouteId = id
         Log.i("OndaCall", "Audio route selected: $id")
         return true
     }
@@ -640,6 +980,14 @@ class CallService : LifecycleService() {
         }
 
         cameraEnabled = enabled
+        if (enabled) {
+            cameraInterrupted = false
+        } else {
+            cameraInterrupted = false
+            cameraUnavailableIds.clear()
+            cameraAvailabilityJob?.cancel()
+            cameraAvailabilityJob = null
+        }
         scope.launch {
             val participant = room?.localParticipant
             if (participant == null) {
@@ -816,6 +1164,7 @@ class CallService : LifecycleService() {
             track.switchCamera(target, facing)
             activeCameraId = target
             cameraPosition = facing
+            cameraInterrupted = false
             torchEnabled = false
             torchPreference = false
             room?.let { applyCameraQuality(it) }
@@ -944,6 +1293,11 @@ class CallService : LifecycleService() {
 
     private fun restartCameraAfterResume() {
         if (!cameraEnabled || cameraRestartInProgress) {
+            return
+        }
+
+        if (cameraInterrupted) {
+            Log.i("OndaCall", "Camera recovery postponed; another app still owns the camera.")
             return
         }
 
