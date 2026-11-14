@@ -715,7 +715,9 @@ class CallService : LifecycleService() {
                 room = liveKitRoom
                 applyCameraQuality(liveKitRoom)
                 liveKitRoom.connect(url, token)
-                liveKitRoom.localParticipant.setMicrophoneEnabled(microphoneEnabled)
+                liveKitRoom.localParticipant.setMicrophoneEnabled(
+                    microphoneEnabled && !microphoneSuppressedByFocus
+                )
                 requestCallAudioFocus()
                 scheduleAudioRouteRefresh("call connected", 0)
                 statusText = "Chamada de voz em andamento"
