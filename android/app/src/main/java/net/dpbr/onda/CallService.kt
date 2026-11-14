@@ -870,6 +870,16 @@ class CallService : LifecycleService() {
             room = newRoom
             applyCameraQuality(newRoom)
             newRoom.connect(url, token)
+            if (screenShareEnabled) {
+                // A new Room needs a new screencast track. The MediaProjection
+                // permission token cannot be safely reused after reconnect, so
+                // end the screen session and let the user start it again.
+                screenShareEnabled = false
+                screenShareResultData = null
+                screenShareJob?.cancel()
+                screenShareJob = null
+                Log.i("OndaCall", "Screen share stopped because the call reconnected.")
+            }
             newRoom.localParticipant.setMicrophoneEnabled(
                 microphoneEnabled && !microphoneSuppressedByFocus
             )
@@ -889,6 +899,7 @@ class CallService : LifecycleService() {
                 }
             }
             statusText = "Chamada de voz em andamento"
+            postMediaState()
             updateNotification()
             Log.i("OndaCall", "LiveKit reconnected after network change.")
         } catch (error: Exception) {
@@ -1139,7 +1150,14 @@ class CallService : LifecycleService() {
         Log.i("OndaCall", "Screen share stopped.")
     }
 
-    private fun setCameraEnabled(enabled: Boolean) {        if (enabled == cameraEnabled && (!enabled || localVideoTrack != null)) {
+    private fun setCameraEnabled(enabled: Boolean) {
+        if (enabled && screenShareEnabled) {
+            // Only one presentation source is shown at a time. Starting the
+            // camera stops the active screen share.
+            stopScreenShare()
+        }
+
+        if (enabled == cameraEnabled && (!enabled || localVideoTrack != null)) {
             if (enabled) {
                 attachCameraRenderer(cameraPreview)
             }
