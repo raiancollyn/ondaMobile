@@ -45,6 +45,8 @@ dependencies {
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
     implementation "io.livekit:livekit-android:2.18.2"
+    implementation "io.livekit:livekit-android-camerax:2.18.2"
+    implementation "androidx.lifecycle:lifecycle-service:2.9.4"
     implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2"
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"

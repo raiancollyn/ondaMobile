@@ -7,19 +7,24 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraManager
 import android.net.ConnectivityManager
 import android.net.Network
 import android.os.Build
-import android.os.IBinder
 import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Log
+import androidx.camera.core.Camera
 import androidx.core.app.NotificationCompat
+import androidx.lifecycle.LifecycleService
 import io.livekit.android.LiveKit
 import io.livekit.android.renderer.TextureViewRenderer
 import io.livekit.android.room.Room
 import io.livekit.android.room.track.LocalVideoTrack
 import io.livekit.android.room.track.Track
+import io.livekit.android.room.track.CameraPosition
+import io.livekit.android.room.track.video.CameraCapturerUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -30,10 +35,12 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import livekit.org.webrtc.CameraXHelper
+import livekit.org.webrtc.getCameraX
 import java.net.HttpURLConnection
 import java.net.URL
 
-class CallService : Service() {
+class CallService : LifecycleService() {
     companion object {
         const val ACTION_START = "net.dpbr.onda.action.START_CALL"
         const val ACTION_STOP = "net.dpbr.onda.action.STOP_CALL"
@@ -75,6 +82,24 @@ class CallService : Service() {
         fun isCameraEnabled(): Boolean = current?.cameraEnabled ?: false
 
         @JvmStatic
+        fun getCameraDevices(): List<Map<String, Any?>> = current?.cameraDevices() ?: emptyList()
+
+        @JvmStatic
+        fun getActiveCameraId(): String = current?.activeCameraId ?: ""
+
+        @JvmStatic
+        fun isTorchSupported(): Boolean = current?.torchSupported() ?: false
+
+        @JvmStatic
+        fun isTorchOn(): Boolean = current?.torchEnabled ?: false
+
+        @JvmStatic
+        fun switchCamera(deviceId: String?): Boolean = current?.switchCameraTo(deviceId) ?: false
+
+        @JvmStatic
+        fun setTorch(enabled: Boolean): Boolean = current?.setTorchEnabled(enabled) ?: false
+
+        @JvmStatic
         fun attachCameraPreview(renderer: TextureViewRenderer?) {
             pendingCameraPreview = renderer
             current?.attachCameraRenderer(renderer)
@@ -111,6 +136,11 @@ class CallService : Service() {
     private var microphoneEnabled = true
     private var cameraEnabled = false
     private var localVideoTrack: LocalVideoTrack? = null
+    private var cameraPosition = CameraPosition.FRONT
+    private var activeCameraId: String? = null
+    private var torchEnabled = false
+    private var torchResetJob: Job? = null
+    private var cameraProvider: CameraCapturerUtils.CameraProvider? = null
     private var cameraPreview: TextureViewRenderer? = null
     private var cameraPreviewInitialized = false
     private var networkCallbackRegisteredAt = 0L
@@ -123,9 +153,26 @@ class CallService : Service() {
     override fun onCreate() {
         super.onCreate()
         current = this
+        setupCameraX()
         pendingCameraPreview?.let { attachCameraRenderer(it) }
         acquireWakeLock()
         createNotificationChannel()
+    }
+
+    private fun setupCameraX() {
+        try {
+            val provider = CameraXHelper.createCameraProvider(this)
+            if (!provider.isSupported(applicationContext)) {
+                Log.i("OndaCall", "CameraX is not supported; keeping Camera2.")
+                return
+            }
+
+            CameraCapturerUtils.registerCameraProvider(provider)
+            cameraProvider = provider
+            Log.i("OndaCall", "CameraX camera provider registered.")
+        } catch (error: Exception) {
+            Log.w("OndaCall", "Could not initialize CameraX; keeping Camera2.", error)
+        }
     }
 
     private fun acquireWakeLock() {
@@ -291,6 +338,11 @@ class CallService : Service() {
     }
 
     override fun onDestroy() {
+        clearTorchMode()
+        cameraProvider?.let { provider ->
+            CameraCapturerUtils.unregisterCameraProvider(provider)
+            cameraProvider = null
+        }
         if (current === this) {
             current = null
         }
@@ -423,12 +475,22 @@ class CallService : Service() {
                         delay(100)
                     }
                     localVideoTrack = track
+                    if (track != null && activeCameraId != null) {
+                        try {
+                            track.switchCamera(activeCameraId, cameraPosition)
+                        } catch (error: Exception) {
+                            Log.w("OndaCall", "Could not restore selected camera.", error)
+                        }
+                    } else {
+                        activeCameraId = findCameraId(CameraPosition.FRONT)
+                    }
                     Log.i("OndaCall", "Camera track available: ${track != null}")
                     attachCameraRenderer(cameraPreview)
                     postMediaState()
                     startForegroundCompat(buildNotification(notificationText()))
                     Log.i("OndaCall", "Camera enabled.")
                 } else {
+                    clearTorchMode()
                     detachCameraTrack()
                     postMediaState()
                     startForegroundCompat(buildNotification(notificationText()))
@@ -436,6 +498,7 @@ class CallService : Service() {
                 }
             } catch (error: Exception) {
                 Log.e("OndaCall", "Could not change camera state.", error)
+                clearTorchMode()
                 cameraEnabled = false
                 detachCameraTrack()
                 postMediaState()
@@ -443,6 +506,250 @@ class CallService : Service() {
             }
 
             cameraStateListener?.onCameraStateChanged(cameraEnabled)
+        }
+    }
+
+    private fun cameraManager(): CameraManager? = getSystemService(CameraManager::class.java)
+
+    private fun cameraDevices(): List<Map<String, Any?>> {
+        val manager = cameraManager() ?: return emptyList()
+        val devices = mutableListOf<Map<String, Any?>>()
+        val counts = mutableMapOf<Int, Int>()
+
+        try {
+            for ((index, id) in manager.cameraIdList.withIndex()) {
+                val characteristics = manager.getCameraCharacteristics(id)
+                val lensFacing = characteristics.get(CameraCharacteristics.LENS_FACING)
+                val facing = when (lensFacing) {
+                    CameraCharacteristics.LENS_FACING_BACK -> "environment"
+                    CameraCharacteristics.LENS_FACING_FRONT -> "user"
+                    else -> ""
+                }
+                val number = (counts[lensFacing ?: 0] ?: 0) + 1
+                counts[lensFacing ?: 0] = number
+                val label = when (facing) {
+                    "environment" -> "Câmera traseira"
+                    "user" -> "Câmera frontal"
+                    else -> "Câmera"
+                } + if (number > 1) " $number" else ""
+
+                devices.add(
+                    mapOf(
+                        "deviceId" to id,
+                        "label" to label,
+                        "facing" to facing
+                    )
+                )
+            }
+        } catch (error: Exception) {
+            Log.w("OndaCall", "Could not list cameras.", error)
+        }
+
+        return devices
+    }
+
+    private fun cameraFacing(deviceId: String): String? {
+        val manager = cameraManager() ?: return null
+        return try {
+            when (manager.getCameraCharacteristics(deviceId).get(CameraCharacteristics.LENS_FACING)) {
+                CameraCharacteristics.LENS_FACING_BACK -> "environment"
+                CameraCharacteristics.LENS_FACING_FRONT -> "user"
+                else -> null
+            }
+        } catch (error: Exception) {
+            Log.w("OndaCall", "Could not read camera facing.", error)
+            null
+        }
+    }
+
+    private fun findCameraId(position: CameraPosition): String? {
+        val manager = cameraManager() ?: return null
+        val wanted = if (position == CameraPosition.BACK) {
+            CameraCharacteristics.LENS_FACING_BACK
+        } else {
+            CameraCharacteristics.LENS_FACING_FRONT
+        }
+
+        return try {
+            manager.cameraIdList.firstOrNull { id ->
+                manager.getCameraCharacteristics(id).get(CameraCharacteristics.LENS_FACING) == wanted
+            }
+        } catch (error: Exception) {
+            Log.w("OndaCall", "Could not find camera for position.", error)
+            null
+        }
+    }
+
+    private fun cameraHasFlash(deviceId: String): Boolean {
+        val manager = cameraManager() ?: return false
+        return try {
+            manager.getCameraCharacteristics(deviceId)
+                .get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+        } catch (error: Exception) {
+            Log.w("OndaCall", "Could not read camera flash capability.", error)
+            false
+        }
+    }
+
+    private fun cameraX(): Camera? {
+        return try {
+            localVideoTrack?.capturer?.getCameraX()?.value
+        } catch (error: Exception) {
+            Log.w("OndaCall", "Could not access CameraX camera.", error)
+            null
+        }
+    }
+
+    private fun torchSupported(): Boolean {
+        if (cameraPosition != CameraPosition.BACK) {
+            return false
+        }
+
+        val camera = cameraX()
+        if (camera != null) {
+            return camera.cameraInfo.hasFlashUnit()
+        }
+
+        val id = activeCameraId ?: return false
+        return cameraFacing(id) == "environment" && cameraHasFlash(id)
+    }
+
+    private fun switchCameraTo(deviceId: String?): Boolean {
+        val track = localVideoTrack ?: return false
+        val manager = cameraManager() ?: return false
+        val target = (deviceId ?: activeCameraId)?.takeIf { it.isNotBlank() } ?: return false
+
+        val facing = try {
+            when (manager.getCameraCharacteristics(target).get(CameraCharacteristics.LENS_FACING)) {
+                CameraCharacteristics.LENS_FACING_BACK -> CameraPosition.BACK
+                CameraCharacteristics.LENS_FACING_FRONT -> CameraPosition.FRONT
+                else -> return false
+            }
+        } catch (error: Exception) {
+            Log.w("OndaCall", "Could not switch to camera $target.", error)
+            return false
+        }
+
+        return try {
+            if (torchEnabled) {
+                clearTorchMode()
+            }
+
+            track.switchCamera(target, facing)
+            activeCameraId = target
+            cameraPosition = facing
+            torchEnabled = false
+            Log.i("OndaCall", "Camera switched to $target ($facing).")
+            true
+        } catch (error: Exception) {
+            Log.e("OndaCall", "Could not switch camera.", error)
+            false
+        }
+    }
+
+    private fun setTorchEnabled(enabled: Boolean): Boolean {
+        if (enabled == torchEnabled) {
+            return true
+        }
+
+        if (cameraPosition != CameraPosition.BACK) {
+            return false
+        }
+
+        val camera = cameraX()
+        if (camera != null) {
+            if (!camera.cameraInfo.hasFlashUnit()) {
+                return false
+            }
+
+            return try {
+                camera.cameraControl.enableTorch(enabled)
+                torchEnabled = enabled
+                Log.i("OndaCall", "CameraX torch enabled: $enabled")
+                true
+            } catch (error: Exception) {
+                Log.w("OndaCall", "Could not change CameraX torch mode.", error)
+                false
+            }
+        }
+
+        val id = activeCameraId ?: return false
+        if (cameraFacing(id) != "environment" || !cameraHasFlash(id)) {
+            return false
+        }
+
+        val manager = cameraManager() ?: return false
+        return try {
+            manager.setTorchMode(id, enabled)
+            torchEnabled = enabled
+            Log.i("OndaCall", "Torch enabled: $enabled")
+            true
+        } catch (error: Exception) {
+            if (!enabled && cameraEnabled) {
+                // Some devices refuse to release torch mode while the camera
+                // session is open. Briefly stop capture so the camera service
+                // can turn the flashlight off.
+                Log.w("OndaCall", "Scheduling torch release with camera pause.")
+                torchEnabled = false
+                restartCaptureForTorchOff(id)
+                return true
+            }
+
+            Log.w("OndaCall", "Could not change torch mode.", error)
+            false
+        }
+    }
+
+    private fun restartCaptureForTorchOff(cameraId: String) {
+        if (torchResetJob != null) {
+            return
+        }
+
+        torchResetJob = scope.launch {
+            val track = localVideoTrack
+            try {
+                track?.stopCapture()
+                delay(350)
+                try {
+                    cameraManager()?.setTorchMode(cameraId, false)
+                } catch (error: Exception) {
+                    Log.w("OndaCall", "Could not release torch during camera pause.", error)
+                }
+                delay(100)
+            } finally {
+                if (cameraEnabled) {
+                    try {
+                        track?.startCapture()
+                    } catch (error: Exception) {
+                        Log.w("OndaCall", "Could not restart camera after torch release.", error)
+                    }
+                }
+                torchResetJob = null
+            }
+        }
+    }
+
+    private fun clearTorchMode() {
+        torchResetJob?.cancel()
+        torchResetJob = null
+        torchEnabled = false
+
+        val camera = cameraX()
+        if (camera != null) {
+            try {
+                camera.cameraControl.enableTorch(false)
+            } catch (error: Exception) {
+                Log.w("OndaCall", "Could not disable CameraX torch.", error)
+            }
+            return
+        }
+
+        val id = activeCameraId ?: return
+        try {
+            cameraManager()?.setTorchMode(id, false)
+        } catch (error: Exception) {
+            // Closing the camera also releases the torch on most devices.
+            Log.w("OndaCall", "Could not release torch mode directly.", error)
         }
     }
 
@@ -624,8 +931,6 @@ class CallService : Service() {
             }
         }
     }
-
-    override fun onBind(intent: Intent?): IBinder? = null
 
     private fun startForegroundCompat(notification: Notification) {
         try {

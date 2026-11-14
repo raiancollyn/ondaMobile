@@ -171,6 +171,45 @@ public class OndaMediaPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void getCameraOptions(PluginCall call) {
+        List<Map<String, Object>> cameras = CallService.getCameraDevices();
+        JSArray devices = new JSArray();
+        String activeId = CallService.getActiveCameraId();
+        String activeFacing = "";
+
+        for (Map<String, Object> camera : cameras) {
+            JSObject item = new JSObject();
+            item.put("deviceId", camera.get("deviceId"));
+            item.put("label", camera.get("label"));
+            item.put("facing", camera.get("facing"));
+            devices.put(item);
+
+            if (activeId != null && activeId.equals(camera.get("deviceId"))) {
+                Object facing = camera.get("facing");
+                activeFacing = facing == null ? "" : facing.toString();
+            }
+        }
+
+        call.resolve(new JSObject()
+            .put("devices", devices)
+            .put("activeDeviceId", activeId == null ? "" : activeId)
+            .put("facingMode", activeFacing)
+            .put("torchSupported", CallService.isTorchSupported())
+            .put("torchOn", CallService.isTorchOn()));
+    }
+
+    @PluginMethod
+    public void switchCamera(PluginCall call) {
+        call.resolve(new JSObject().put("changed", CallService.switchCamera(call.getString("deviceId"))));
+    }
+
+    @PluginMethod
+    public void setCameraTorch(PluginCall call) {
+        Boolean enabled = call.getBoolean("enabled", false);
+        call.resolve(new JSObject().put("changed", CallService.setTorch(Boolean.TRUE.equals(enabled))));
+    }
+
+    @PluginMethod
     public void setMic(PluginCall call) {
         Boolean enabled = call.getBoolean("enabled", true);
         CallService.setMicrophone(Boolean.TRUE.equals(enabled));

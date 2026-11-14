@@ -61,6 +61,7 @@ Integração web → nativo validada em produção:
 - tarjas nativas no topo e na base para as barras do sistema;
 - seleção de alto-falante, auricular, Bluetooth e fone com fio;
 - câmera nativa publicada na sala;
+- escolha entre câmera frontal/traseira e lanterna, via CameraX;
 - foreground service do tipo `camera` mantém a câmera ativa com a tela desligada;
 - modo picture-in-picture ao sair do app, com foco no participante que está falando;
 - vídeos remotos renderizados no app por uma conexão de vídeo separada;
