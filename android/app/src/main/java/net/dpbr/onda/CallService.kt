@@ -38,6 +38,7 @@ import io.livekit.android.room.track.LocalVideoTrackOptions
 import io.livekit.android.room.track.Track
 import io.livekit.android.room.track.VideoCaptureParameter
 import io.livekit.android.room.track.VideoEncoding
+import io.livekit.android.room.track.screencapture.ScreenCaptureParams
 import io.livekit.android.room.track.video.CameraCapturerUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -61,6 +62,8 @@ class CallService : LifecycleService() {
         const val ACTION_STOP = "net.dpbr.onda.action.STOP_CALL"
         const val ACTION_TOGGLE_MIC = "net.dpbr.onda.action.TOGGLE_MIC"
         const val ACTION_DISABLE_CAMERA = "net.dpbr.onda.action.DISABLE_CAMERA"
+        const val ACTION_START_SCREEN_SHARE = "net.dpbr.onda.action.START_SCREEN_SHARE"
+        const val ACTION_STOP_SCREEN_SHARE = "net.dpbr.onda.action.STOP_SCREEN_SHARE"
         const val EXTRA_URL = "net.dpbr.onda.extra.LIVEKIT_URL"
         const val EXTRA_TOKEN = "net.dpbr.onda.extra.LIVEKIT_TOKEN"
         const val EXTRA_ROOM_ID = "net.dpbr.onda.extra.ROOM_ID"
@@ -73,8 +76,15 @@ class CallService : LifecycleService() {
         const val EXTRA_CAMERA_FRAME_RATE = "net.dpbr.onda.extra.CAMERA_FRAME_RATE"
         const val EXTRA_CAMERA_BITRATE = "net.dpbr.onda.extra.CAMERA_BITRATE"
         const val EXTRA_START_NONCE = "net.dpbr.onda.extra.START_NONCE"
+        const val EXTRA_SCREEN_RESULT_CODE = "net.dpbr.onda.extra.SCREEN_RESULT_CODE"
+        const val EXTRA_SCREEN_RESULT_DATA = "net.dpbr.onda.extra.SCREEN_RESULT_DATA"
+        const val EXTRA_SCREEN_WIDTH = "net.dpbr.onda.extra.SCREEN_WIDTH"
+        const val EXTRA_SCREEN_HEIGHT = "net.dpbr.onda.extra.SCREEN_HEIGHT"
+        const val EXTRA_SCREEN_FRAME_RATE = "net.dpbr.onda.extra.SCREEN_FRAME_RATE"
+        const val EXTRA_SCREEN_BITRATE = "net.dpbr.onda.extra.SCREEN_BITRATE"
         private const val CHANNEL_ID = "onda_call"
         private const val NOTIFICATION_ID = 1001
+        private const val SCREEN_NOTIFICATION_ID = 1002
 
         @Volatile
         private var current: CallService? = null
@@ -135,6 +145,9 @@ class CallService : LifecycleService() {
 
         @JvmStatic
         fun isCameraEnabled(): Boolean = current?.cameraEnabled ?: false
+
+        @JvmStatic
+        fun isScreenShareEnabled(): Boolean = current?.screenShareEnabled ?: false
 
         @JvmStatic
         fun getCameraDevices(): List<Map<String, Any?>> = current?.cameraDevices() ?: emptyList()
@@ -200,6 +213,9 @@ class CallService : LifecycleService() {
     private var liveKitToken: String? = null
     private var microphoneEnabled = true
     private var cameraEnabled = false
+    private var screenShareEnabled = false
+    private var screenShareJob: Job? = null
+    private var screenShareResultData: Intent? = null
     private var localVideoTrack: LocalVideoTrack? = null
     private var cameraPosition = CameraPosition.FRONT
     private var activeCameraId: String? = null
@@ -212,6 +228,10 @@ class CallService : LifecycleService() {
     private var cameraCaptureHeight = 720
     private var cameraFrameRate = 30
     private var cameraBitrateKbps = 1500
+    private var screenCaptureWidth = 1920
+    private var screenCaptureHeight = 1080
+    private var screenFrameRate = 30
+    private var screenBitrateKbps = 4000
     private val cameraPreferences by lazy {
         getSharedPreferences("onda_camera", MODE_PRIVATE)
     }
@@ -651,6 +671,37 @@ class CallService : LifecycleService() {
             return START_NOT_STICKY
         }
 
+        if (intent.action == ACTION_START_SCREEN_SHARE) {
+            if (room == null) {
+                stopSelf()
+                return START_NOT_STICKY
+            }
+
+            val resultCode = intent.getIntExtra(EXTRA_SCREEN_RESULT_CODE, 0)
+            @Suppress("DEPRECATION")
+            val resultData = intent.getParcelableExtra<Intent>(EXTRA_SCREEN_RESULT_DATA)
+            screenCaptureWidth = intent.getIntExtra(EXTRA_SCREEN_WIDTH, 1920)
+            screenCaptureHeight = intent.getIntExtra(EXTRA_SCREEN_HEIGHT, 1080)
+            screenFrameRate = intent.getIntExtra(EXTRA_SCREEN_FRAME_RATE, 30)
+            screenBitrateKbps = intent.getIntExtra(EXTRA_SCREEN_BITRATE, 4000)
+            if (resultCode != android.app.Activity.RESULT_OK || resultData == null) {
+                Log.w("OndaCall", "Screen share permission was not granted.")
+                return START_NOT_STICKY
+            }
+
+            startScreenShare(resultCode, resultData)
+            return START_NOT_STICKY
+        }
+
+        if (intent.action == ACTION_STOP_SCREEN_SHARE) {
+            if (room == null) {
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            stopScreenShare()
+            return START_NOT_STICKY
+        }
+
         if (intent.getStringExtra(EXTRA_START_NONCE) != processNonce) {
             // This intent survived a process/package restart; it is not a
             // current call request.
@@ -708,6 +759,22 @@ class CallService : LifecycleService() {
             simulcast = false
         )
         Log.i("OndaCall", "Camera quality: ${width}x${height}@${fps} ${bitrate}kbps")
+    }
+
+    private fun applyScreenShareQuality(target: Room) {
+        val width = screenCaptureWidth.coerceIn(320, 3840)
+        val height = screenCaptureHeight.coerceIn(240, 2160)
+        val fps = screenFrameRate.coerceIn(1, 60)
+        val bitrate = screenBitrateKbps.coerceIn(300, 20_000)
+
+        target.screenShareTrackCaptureDefaults = LocalVideoTrackOptions(
+            captureParams = VideoCaptureParameter(width, height, fps, false)
+        )
+        target.screenShareTrackPublishDefaults = VideoTrackPublishDefaults(
+            videoEncoding = VideoEncoding(bitrate * 1000, fps),
+            simulcast = false
+        )
+        Log.i("OndaCall", "Screen quality: ${width}x${height}@${fps} ${bitrate}kbps")
     }
 
     private fun connectToLiveKit(url: String, token: String) {
@@ -914,6 +981,7 @@ class CallService : LifecycleService() {
 
     private fun notificationText(): String = when {
         !microphoneEnabled -> "Microfone silenciado"
+        screenShareEnabled -> "Compartilhando a tela"
         cameraEnabled -> "Chamada de voz e câmera em andamento"
         else -> statusText
     }
@@ -992,8 +1060,86 @@ class CallService : LifecycleService() {
         }
     }
 
-    private fun setCameraEnabled(enabled: Boolean) {
-        if (enabled == cameraEnabled && (!enabled || localVideoTrack != null)) {
+    private fun startScreenShare(resultCode: Int, resultData: Intent) {
+        if (screenShareEnabled) {
+            return
+        }
+
+        screenShareResultData = resultData
+        screenShareJob?.cancel()
+        screenShareJob = scope.launch {
+            try {
+                if (cameraEnabled) {
+                    setCameraEnabled(false)
+                    delay(350)
+                }
+
+                val participant = room?.localParticipant
+                if (participant == null) {
+                    screenShareResultData = null
+                    return@launch
+                }
+
+                room?.let { applyScreenShareQuality(it) }
+
+                val screenNotification = buildNotification("Compartilhando a tela")
+                val params = ScreenCaptureParams(
+                    resultData,
+                    SCREEN_NOTIFICATION_ID,
+                    screenNotification
+                ) {
+                    scope.launch { handleScreenShareStopped() }
+                }
+
+                val started = participant.setScreenShareEnabled(true, params)
+                screenShareEnabled = started
+                if (!started) {
+                    screenShareResultData = null
+                }
+                postMediaState()
+                updateNotification()
+                Log.i("OndaCall", "Screen share enabled: $started (result=$resultCode)")
+            } catch (error: Exception) {
+                screenShareEnabled = false
+                screenShareResultData = null
+                Log.e("OndaCall", "Could not start screen sharing.", error)
+                postMediaState()
+                updateNotification()
+            }
+        }
+    }
+
+    private fun stopScreenShare() {
+        if (!screenShareEnabled) {
+            screenShareResultData = null
+            return
+        }
+
+        screenShareJob?.cancel()
+        screenShareJob = scope.launch {
+            try {
+                room?.localParticipant?.setScreenShareEnabled(false)
+            } catch (error: Exception) {
+                Log.w("OndaCall", "Could not stop screen sharing cleanly.", error)
+            } finally {
+                handleScreenShareStopped()
+            }
+        }
+    }
+
+    private fun handleScreenShareStopped() {
+        if (!screenShareEnabled && screenShareResultData == null) {
+            return
+        }
+
+        screenShareEnabled = false
+        screenShareResultData = null
+        postMediaState()
+        updateNotification()
+        Log.i("OndaCall", "Screen share stopped.")
+    }
+
+    private fun setCameraEnabled(enabled: Boolean) {        if (enabled == cameraEnabled && (!enabled || localVideoTrack != null)) {
             if (enabled) {
                 attachCameraRenderer(cameraPreview)
             }
@@ -1545,7 +1691,7 @@ class CallService : LifecycleService() {
                         setRequestProperty("Content-Type", "application/json")
                     }
                     val body =
-                        """{"roomId":"$room","guestId":"$guest","micOn":$microphoneEnabled,"cameraOn":$cameraEnabled,"screenOn":false,"screenWithAudio":false}"""
+                        """{"roomId":"$room","guestId":"$guest","micOn":$microphoneEnabled,"cameraOn":$cameraEnabled,"screenOn":$screenShareEnabled,"screenWithAudio":false}"""
                     connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
                     val code = connection.responseCode
                     if (code !in 200..299) {
@@ -1691,6 +1837,14 @@ class CallService : LifecycleService() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val screenIntent = Intent(this, CallService::class.java).setAction(ACTION_STOP_SCREEN_SHARE)
+        val screenPending = PendingIntent.getService(
+            this,
+            4,
+            screenIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_menu_call)
             .setContentTitle("Onda")
@@ -1703,6 +1857,10 @@ class CallService : LifecycleService() {
 
         if (cameraEnabled) {
             builder.addAction(0, "Desligar câmera", cameraPending)
+        }
+
+        if (screenShareEnabled) {
+            builder.addAction(0, "Parar tela", screenPending)
         }
 
         return builder

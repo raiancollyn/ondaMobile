@@ -217,6 +217,49 @@ public class OndaMediaPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void startScreenShare(PluginCall call) {
+        if (CallService.isScreenShareEnabled()) {
+            call.resolve(new JSObject().put("requested", true).put("already", true));
+            return;
+        }
+
+        if (!(getActivity() instanceof MainActivity)) {
+            call.reject("Compartilhamento de tela indisponível.");
+            return;
+        }
+
+        JSObject quality = call.getObject("quality");
+        int width = quality != null ? quality.optInt("width", 1920) : 1920;
+        int height = quality != null ? quality.optInt("height", 1080) : 1080;
+        int frameRate = quality != null ? quality.optInt("frameRate", 30) : 30;
+        int bitrate = quality != null ? quality.optInt("bitrateKbps", 4000) : 4000;
+
+        MainActivity activity = (MainActivity) getActivity();
+        activity.setScreenShareQuality(width, height, frameRate, bitrate);
+        boolean requested = activity.requestScreenShare();
+        if (requested) {
+            call.resolve(new JSObject().put("requested", true));
+        } else {
+            call.reject("Não foi possível solicitar o compartilhamento.");
+        }
+    }
+
+    @PluginMethod
+    public void stopScreenShare(PluginCall call) {
+        Intent intent = new Intent(getContext(), CallService.class)
+            .setAction(CallService.ACTION_STOP_SCREEN_SHARE);
+        getContext().startService(intent);
+        call.resolve(new JSObject().put("requested", true));
+    }
+
+    @PluginMethod
+    public void getScreenShare(PluginCall call) {
+        call.resolve(new JSObject()
+            .put("enabled", CallService.isScreenShareEnabled())
+            .put("running", CallService.isScreenShareEnabled()));
+    }
+
+    @PluginMethod
     public void setCameraQuality(PluginCall call) {
         int width = call.getInt("width", 1280);
         int height = call.getInt("height", 720);

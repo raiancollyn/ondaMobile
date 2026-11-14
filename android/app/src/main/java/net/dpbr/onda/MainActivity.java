@@ -8,6 +8,7 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
+import android.media.projection.MediaProjectionManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -31,6 +32,7 @@ import livekit.org.webrtc.RendererCommon;
 
 public class MainActivity extends BridgeActivity {
     private static final int CALL_PERMISSIONS_REQUEST = 42;
+    private static final int SCREEN_SHARE_REQUEST = 43;
     private static final int DARK_SCRIM = Color.rgb(12, 25, 22);
     private static final int LIGHT_SCRIM = Color.rgb(247, 243, 235);
     private boolean bridgeProbeScheduled;
@@ -47,6 +49,10 @@ public class MainActivity extends BridgeActivity {
     private int pendingCameraHeight = 720;
     private int pendingCameraFrameRate = 30;
     private int pendingCameraBitrate = 1500;
+    private int pendingScreenWidth = 1920;
+    private int pendingScreenHeight = 1080;
+    private int pendingScreenFrameRate = 30;
+    private int pendingScreenBitrate = 4000;
     private View statusBarScrim;
     private View navigationBarScrim;
     private boolean insetsListenerInstalled;
@@ -197,6 +203,57 @@ public class MainActivity extends BridgeActivity {
         callIntent.putExtra(CallService.EXTRA_CAMERA_BITRATE, pendingCameraBitrate);
         callIntent.putExtra(CallService.EXTRA_START_NONCE, CallService.getProcessNonce());
         ContextCompat.startForegroundService(this, callIntent);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (requestCode == SCREEN_SHARE_REQUEST) {
+            if (resultCode == RESULT_OK && data != null && CallService.isCallActive()) {
+                Intent shareIntent = new Intent(this, CallService.class)
+                    .setAction(CallService.ACTION_START_SCREEN_SHARE)
+                    .putExtra(CallService.EXTRA_SCREEN_RESULT_CODE, resultCode)
+                    .putExtra(CallService.EXTRA_SCREEN_RESULT_DATA, data)
+                    .putExtra(CallService.EXTRA_SCREEN_WIDTH, pendingScreenWidth)
+                    .putExtra(CallService.EXTRA_SCREEN_HEIGHT, pendingScreenHeight)
+                    .putExtra(CallService.EXTRA_SCREEN_FRAME_RATE, pendingScreenFrameRate)
+                    .putExtra(CallService.EXTRA_SCREEN_BITRATE, pendingScreenBitrate);
+                startService(shareIntent);
+            } else if (resultCode != RESULT_OK) {
+                Toast.makeText(this, "O compartilhamento de tela foi cancelado.", Toast.LENGTH_SHORT).show();
+            }
+            return;
+        }
+
+        super.onActivityResult(requestCode, resultCode, data);
+    }
+
+    public void setScreenShareQuality(int width, int height, int frameRate, int bitrateKbps) {
+        pendingScreenWidth = Math.max(320, Math.min(3840, width));
+        pendingScreenHeight = Math.max(240, Math.min(2160, height));
+        pendingScreenFrameRate = Math.max(1, Math.min(60, frameRate));
+        pendingScreenBitrate = Math.max(300, Math.min(20_000, bitrateKbps));
+    }
+
+    public boolean requestScreenShare() {
+        if (!CallService.isCallActive()) {
+            Toast.makeText(this, "Entre em uma chamada antes de compartilhar a tela.", Toast.LENGTH_SHORT).show();
+            return false;
+        }
+
+        try {
+            MediaProjectionManager manager =
+                (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
+            if (manager == null) {
+                Toast.makeText(this, "Compartilhamento de tela indisponível.", Toast.LENGTH_SHORT).show();
+                return false;
+            }
+
+            startActivityForResult(manager.createScreenCaptureIntent(), SCREEN_SHARE_REQUEST);
+            return true;
+        } catch (Exception error) {
+            Toast.makeText(this, "Não foi possível abrir o compartilhamento de tela.", Toast.LENGTH_SHORT).show();
+            return false;
+        }
     }
 
     @Override
