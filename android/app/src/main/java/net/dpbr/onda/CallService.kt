@@ -218,6 +218,7 @@ class CallService : LifecycleService() {
     private var audioDeviceCallback: AudioDeviceCallback? = null
     private var preferredAudioRouteId: String? = null
     private var lastAudioRouteId: String? = null
+    private var audioRouteSuppressedUntil = 0L
     private var microphoneSuppressedByFocus = false
     private var audioRoutingJob: Job? = null
     private var cameraAvailabilityCallback: CameraManager.AvailabilityCallback? = null
@@ -426,6 +427,10 @@ class CallService : LifecycleService() {
     }
 
     private fun applyBestAudioRoute(reason: String) {
+        if (SystemClock.elapsedRealtime() < audioRouteSuppressedUntil) {
+            return
+        }
+
         val handler = room?.audioSwitchHandler ?: return
         val devices = handler.availableAudioDevices
         if (devices.isEmpty()) {
@@ -921,6 +926,9 @@ class CallService : LifecycleService() {
         handler.selectDevice(device)
         preferredAudioRouteId = id
         lastAudioRouteId = id
+        // Absorb the device callback caused by this selection instead of
+        // immediately choosing another route in a loop.
+        audioRouteSuppressedUntil = SystemClock.elapsedRealtime() + 5_000
         Log.i("OndaCall", "Audio route selected: $id")
         return true
     }
