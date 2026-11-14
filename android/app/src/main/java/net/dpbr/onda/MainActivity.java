@@ -401,6 +401,10 @@ public class MainActivity extends BridgeActivity {
     }
 
     public void updateSystemBarTheme(String theme) {
+        runOnUiThread(() -> applySystemBarTheme(theme));
+    }
+
+    private void applySystemBarTheme(String theme) {
         boolean light = "light".equalsIgnoreCase(theme);
         int color = light ? LIGHT_SCRIM : DARK_SCRIM;
         if (statusBarScrim != null) {
