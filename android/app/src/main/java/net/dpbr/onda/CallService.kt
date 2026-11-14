@@ -36,6 +36,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import livekit.org.webrtc.CameraXHelper
+import livekit.org.webrtc.VideoSink
+import livekit.org.webrtc.VideoTrack
 import livekit.org.webrtc.getCameraX
 import java.net.HttpURLConnection
 import java.net.URL
@@ -147,6 +149,15 @@ class CallService : LifecycleService() {
     private var torchResetJob: Job? = null
     private var cameraProvider: CameraCapturerUtils.CameraProvider? = null
     private var cameraRestartInProgress = false
+    private var cameraFrameTrack: VideoTrack? = null
+    @Volatile
+    private var lastCameraFrameAt = 0L
+    private var lastCameraRestartAt = 0L
+    private var cameraWatchdogJob: Job? = null
+    private val cameraFrameSink = VideoSink { frame ->
+        lastCameraFrameAt = SystemClock.elapsedRealtime()
+        frame.release()
+    }
     private var cameraPreview: TextureViewRenderer? = null
     private var cameraPreviewInitialized = false
     private var networkCallbackRegisteredAt = 0L
@@ -160,9 +171,59 @@ class CallService : LifecycleService() {
         super.onCreate()
         current = this
         setupCameraX()
+        startCameraWatchdog()
         pendingCameraPreview?.let { attachCameraRenderer(it) }
         acquireWakeLock()
         createNotificationChannel()
+    }
+
+    private fun startCameraWatchdog() {
+        if (cameraWatchdogJob != null) {
+            return
+        }
+
+        cameraWatchdogJob = scope.launch {
+            while (isActive) {
+                delay(5000)
+                if (!cameraEnabled || cameraRestartInProgress) {
+                    continue
+                }
+
+                val now = SystemClock.elapsedRealtime()
+                if (lastCameraFrameAt <= 0L) {
+                    lastCameraFrameAt = now
+                    continue
+                }
+
+                val staleFor = now - lastCameraFrameAt
+                if (staleFor > 12_000 && now - lastCameraRestartAt > 30_000) {
+                    Log.w("OndaCall", "Camera watchdog: no frames for ${staleFor}ms; restarting.")
+                    restartCameraAfterResume()
+                }
+            }
+        }
+    }
+
+    private fun attachCameraFrameSink(track: LocalVideoTrack?) {
+        val rtcTrack = track?.rtcTrack
+        if (cameraFrameTrack === rtcTrack) {
+            lastCameraFrameAt = SystemClock.elapsedRealtime()
+            return
+        }
+
+        try {
+            cameraFrameTrack?.removeSink(cameraFrameSink)
+        } catch (error: Exception) {
+            Log.w("OndaCall", "Could not remove old camera frame sink.", error)
+        }
+
+        cameraFrameTrack = rtcTrack
+        lastCameraFrameAt = SystemClock.elapsedRealtime()
+        try {
+            rtcTrack?.addSink(cameraFrameSink)
+        } catch (error: Exception) {
+            Log.w("OndaCall", "Could not attach camera frame sink.", error)
+        }
     }
 
     private fun setupCameraX() {
@@ -347,6 +408,12 @@ class CallService : LifecycleService() {
 
     override fun onDestroy() {
         clearTorchMode()
+        try {
+            cameraFrameTrack?.removeSink(cameraFrameSink)
+        } catch (error: Exception) {
+            Log.w("OndaCall", "Could not remove camera frame sink.", error)
+        }
+        cameraFrameTrack = null
         cameraProvider?.let { provider ->
             CameraCapturerUtils.unregisterCameraProvider(provider)
             cameraProvider = null
@@ -483,6 +550,7 @@ class CallService : LifecycleService() {
                         delay(100)
                     }
                     localVideoTrack = track
+                    attachCameraFrameSink(track)
                     if (track != null && activeCameraId != null) {
                         try {
                             track.switchCamera(activeCameraId, cameraPosition)
@@ -771,6 +839,7 @@ class CallService : LifecycleService() {
         scope.launch {
             try {
                 Log.i("OndaCall", "Reasserting camera after app resume.")
+                lastCameraRestartAt = SystemClock.elapsedRealtime()
                 clearTorchMode()
                 cameraEnabled = false
                 participant.setCameraEnabled(false)
@@ -794,6 +863,7 @@ class CallService : LifecycleService() {
                 }
 
                 localVideoTrack = track
+                attachCameraFrameSink(track)
                 if (track != null && activeCameraId != null) {
                     try {
                         track.switchCamera(activeCameraId, cameraPosition)
@@ -849,6 +919,14 @@ class CallService : LifecycleService() {
     }
 
     private fun detachCameraTrack() {
+        try {
+            cameraFrameTrack?.removeSink(cameraFrameSink)
+        } catch (error: Exception) {
+            Log.w("OndaCall", "Could not detach camera frame sink.", error)
+        }
+        cameraFrameTrack = null
+        lastCameraFrameAt = 0L
+
         val renderer = cameraPreview
         val track = localVideoTrack
         if (renderer != null && track != null) {
