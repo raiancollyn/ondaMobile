@@ -21,9 +21,13 @@ import androidx.lifecycle.LifecycleService
 import io.livekit.android.LiveKit
 import io.livekit.android.renderer.TextureViewRenderer
 import io.livekit.android.room.Room
-import io.livekit.android.room.track.LocalVideoTrack
-import io.livekit.android.room.track.Track
+import io.livekit.android.room.participant.VideoTrackPublishDefaults
 import io.livekit.android.room.track.CameraPosition
+import io.livekit.android.room.track.LocalVideoTrack
+import io.livekit.android.room.track.LocalVideoTrackOptions
+import io.livekit.android.room.track.Track
+import io.livekit.android.room.track.VideoCaptureParameter
+import io.livekit.android.room.track.VideoEncoding
 import io.livekit.android.room.track.video.CameraCapturerUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -53,6 +57,10 @@ class CallService : LifecycleService() {
         const val EXTRA_PRESENCE_URL = "net.dpbr.onda.extra.PRESENCE_URL"
         const val EXTRA_GUEST_NAME = "net.dpbr.onda.extra.GUEST_NAME"
         const val EXTRA_AVATAR_TONE = "net.dpbr.onda.extra.AVATAR_TONE"
+        const val EXTRA_CAMERA_WIDTH = "net.dpbr.onda.extra.CAMERA_WIDTH"
+        const val EXTRA_CAMERA_HEIGHT = "net.dpbr.onda.extra.CAMERA_HEIGHT"
+        const val EXTRA_CAMERA_FRAME_RATE = "net.dpbr.onda.extra.CAMERA_FRAME_RATE"
+        const val EXTRA_CAMERA_BITRATE = "net.dpbr.onda.extra.CAMERA_BITRATE"
         private const val CHANNEL_ID = "onda_call"
         private const val NOTIFICATION_ID = 1001
 
@@ -105,6 +113,11 @@ class CallService : LifecycleService() {
         }
 
         @JvmStatic
+        fun setCameraQuality(width: Int, height: Int, frameRate: Int, bitrateKbps: Int) {
+            current?.updateCameraQuality(width, height, frameRate, bitrateKbps)
+        }
+
+        @JvmStatic
         fun attachCameraPreview(renderer: TextureViewRenderer?) {
             pendingCameraPreview = renderer
             current?.attachCameraRenderer(renderer)
@@ -147,6 +160,10 @@ class CallService : LifecycleService() {
     private var torchResetJob: Job? = null
     private var cameraProvider: CameraCapturerUtils.CameraProvider? = null
     private var cameraRestartInProgress = false
+    private var cameraCaptureWidth = 1280
+    private var cameraCaptureHeight = 720
+    private var cameraFrameRate = 30
+    private var cameraBitrateKbps = 1500
     private var cameraPreview: TextureViewRenderer? = null
     private var cameraPreviewInitialized = false
     private var networkCallbackRegisteredAt = 0L
@@ -223,6 +240,10 @@ class CallService : LifecycleService() {
         guestName = intent?.getStringExtra(EXTRA_GUEST_NAME)
         guestAvatarTone = intent?.getIntExtra(EXTRA_AVATAR_TONE, 0) ?: 0
         presenceUrl = intent?.getStringExtra(EXTRA_PRESENCE_URL)
+        cameraCaptureWidth = intent?.getIntExtra(EXTRA_CAMERA_WIDTH, 1280) ?: 1280
+        cameraCaptureHeight = intent?.getIntExtra(EXTRA_CAMERA_HEIGHT, 720) ?: 720
+        cameraFrameRate = intent?.getIntExtra(EXTRA_CAMERA_FRAME_RATE, 30) ?: 30
+        cameraBitrateKbps = intent?.getIntExtra(EXTRA_CAMERA_BITRATE, 1500) ?: 1500
 
         val url = intent?.getStringExtra(EXTRA_URL)
         val token = intent?.getStringExtra(EXTRA_TOKEN)
@@ -231,6 +252,32 @@ class CallService : LifecycleService() {
         }
 
         return START_NOT_STICKY
+    }
+
+    private fun updateCameraQuality(width: Int, height: Int, frameRate: Int, bitrateKbps: Int) {
+        cameraCaptureWidth = width
+        cameraCaptureHeight = height
+        cameraFrameRate = frameRate
+        cameraBitrateKbps = bitrateKbps
+        room?.let { applyCameraQuality(it) }
+        if (cameraEnabled) {
+            restartCameraAfterResume()
+        }
+    }
+
+    private fun applyCameraQuality(target: Room) {
+        val width = cameraCaptureWidth.coerceIn(160, 1920)
+        val height = cameraCaptureHeight.coerceIn(120, 1080)
+        val fps = cameraFrameRate.coerceIn(1, 60)
+        val bitrate = cameraBitrateKbps.coerceIn(100, 20_000)
+
+        target.videoTrackCaptureDefaults = LocalVideoTrackOptions(
+            captureParams = VideoCaptureParameter(width, height, fps, true)
+        )
+        target.videoTrackPublishDefaults = VideoTrackPublishDefaults(
+            videoEncoding = VideoEncoding(bitrate * 1000, fps)
+        )
+        Log.i("OndaCall", "Camera quality: ${width}x${height}@${fps} ${bitrate}kbps")
     }
 
     private fun connectToLiveKit(url: String, token: String) {
@@ -247,6 +294,7 @@ class CallService : LifecycleService() {
             try {
                 val liveKitRoom = LiveKit.create(applicationContext)
                 room = liveKitRoom
+                applyCameraQuality(liveKitRoom)
                 liveKitRoom.connect(url, token)
                 liveKitRoom.localParticipant.setMicrophoneEnabled(microphoneEnabled)
                 statusText = "Chamada de voz em andamento"
@@ -319,6 +367,7 @@ class CallService : LifecycleService() {
             oldRoom?.disconnect()
             val newRoom = LiveKit.create(applicationContext)
             room = newRoom
+            applyCameraQuality(newRoom)
             newRoom.connect(url, token)
             newRoom.localParticipant.setMicrophoneEnabled(microphoneEnabled)
             cameraPreviewInitialized = false

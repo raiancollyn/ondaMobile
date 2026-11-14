@@ -41,6 +41,10 @@ public class MainActivity extends BridgeActivity {
     private String pendingCallPresenceUrl;
     private String pendingCallGuestName;
     private int pendingCallAvatarTone;
+    private int pendingCameraWidth = 1280;
+    private int pendingCameraHeight = 720;
+    private int pendingCameraFrameRate = 30;
+    private int pendingCameraBitrate = 1500;
     private View statusBarScrim;
     private View navigationBarScrim;
     private boolean insetsListenerInstalled;
@@ -100,6 +104,34 @@ public class MainActivity extends BridgeActivity {
         String guestName,
         int avatarTone
     ) {
+        startCallWithPermissions(
+            url,
+            token,
+            roomId,
+            guestId,
+            presenceUrl,
+            guestName,
+            avatarTone,
+            1280,
+            720,
+            30,
+            1500
+        );
+    }
+
+    public void startCallWithPermissions(
+        String url,
+        String token,
+        String roomId,
+        String guestId,
+        String presenceUrl,
+        String guestName,
+        int avatarTone,
+        int cameraWidth,
+        int cameraHeight,
+        int cameraFrameRate,
+        int cameraBitrate
+    ) {
         pendingCallUrl = url;
         pendingCallToken = token;
         pendingCallRoomId = roomId;
@@ -107,6 +139,10 @@ public class MainActivity extends BridgeActivity {
         pendingCallPresenceUrl = presenceUrl;
         pendingCallGuestName = guestName;
         pendingCallAvatarTone = avatarTone;
+        pendingCameraWidth = cameraWidth;
+        pendingCameraHeight = cameraHeight;
+        pendingCameraFrameRate = cameraFrameRate;
+        pendingCameraBitrate = cameraBitrate;
 
         String[] needed = {
             Manifest.permission.RECORD_AUDIO,
@@ -151,6 +187,10 @@ public class MainActivity extends BridgeActivity {
             callIntent.putExtra(CallService.EXTRA_GUEST_NAME, pendingCallGuestName);
         }
         callIntent.putExtra(CallService.EXTRA_AVATAR_TONE, pendingCallAvatarTone);
+        callIntent.putExtra(CallService.EXTRA_CAMERA_WIDTH, pendingCameraWidth);
+        callIntent.putExtra(CallService.EXTRA_CAMERA_HEIGHT, pendingCameraHeight);
+        callIntent.putExtra(CallService.EXTRA_CAMERA_FRAME_RATE, pendingCameraFrameRate);
+        callIntent.putExtra(CallService.EXTRA_CAMERA_BITRATE, pendingCameraBitrate);
         ContextCompat.startForegroundService(this, callIntent);
     }
 

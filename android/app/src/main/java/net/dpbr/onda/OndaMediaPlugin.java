@@ -41,6 +41,12 @@ public class OndaMediaPlugin extends Plugin {
             return;
         }
 
+        JSObject cameraQuality = call.getObject("cameraQuality");
+        int cameraWidth = cameraQuality != null ? cameraQuality.optInt("width", 1280) : 1280;
+        int cameraHeight = cameraQuality != null ? cameraQuality.optInt("height", 720) : 720;
+        int cameraFrameRate = cameraQuality != null ? cameraQuality.optInt("frameRate", 30) : 30;
+        int cameraBitrate = cameraQuality != null ? cameraQuality.optInt("bitrateKbps", 1500) : 1500;
+
         if (getActivity() instanceof MainActivity) {
             ((MainActivity) getActivity()).startCallWithPermissions(
                 url,
@@ -49,7 +55,11 @@ public class OndaMediaPlugin extends Plugin {
                 call.getString("guestId"),
                 call.getString("presenceUrl"),
                 call.getString("guestName"),
-                call.getInt("avatarTone", 0)
+                call.getInt("avatarTone", 0),
+                cameraWidth,
+                cameraHeight,
+                cameraFrameRate,
+                cameraBitrate
             );
         } else {
             Intent intent = new Intent(getContext(), CallService.class)
@@ -60,7 +70,11 @@ public class OndaMediaPlugin extends Plugin {
                 .putExtra(CallService.EXTRA_GUEST_ID, call.getString("guestId"))
                 .putExtra(CallService.EXTRA_PRESENCE_URL, call.getString("presenceUrl"))
                 .putExtra(CallService.EXTRA_GUEST_NAME, call.getString("guestName"))
-                .putExtra(CallService.EXTRA_AVATAR_TONE, call.getInt("avatarTone", 0));
+                .putExtra(CallService.EXTRA_AVATAR_TONE, call.getInt("avatarTone", 0))
+                .putExtra(CallService.EXTRA_CAMERA_WIDTH, cameraWidth)
+                .putExtra(CallService.EXTRA_CAMERA_HEIGHT, cameraHeight)
+                .putExtra(CallService.EXTRA_CAMERA_FRAME_RATE, cameraFrameRate)
+                .putExtra(CallService.EXTRA_CAMERA_BITRATE, cameraBitrate);
             ContextCompat.startForegroundService(getContext(), intent);
         }
         call.resolve(new JSObject().put("started", true));
@@ -168,6 +182,16 @@ public class OndaMediaPlugin extends Plugin {
         call.resolve(new JSObject()
             .put("enabled", CallService.isCameraEnabled())
             .put("running", CallService.isCameraEnabled()));
+    }
+
+    @PluginMethod
+    public void setCameraQuality(PluginCall call) {
+        int width = call.getInt("width", 1280);
+        int height = call.getInt("height", 720);
+        int frameRate = call.getInt("frameRate", 30);
+        int bitrate = call.getInt("bitrateKbps", 1500);
+        CallService.setCameraQuality(width, height, frameRate, bitrate);
+        call.resolve(new JSObject().put("applied", true));
     }
 
     @PluginMethod
