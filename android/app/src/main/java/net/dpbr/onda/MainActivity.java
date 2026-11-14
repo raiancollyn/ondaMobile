@@ -48,7 +48,6 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(OndaMediaPlugin.class);
         super.onCreate(savedInstanceState);
         installSystemBarScrims();
-        installCameraPreview();
         installWindowInsetsListener();
         getWindow().getDecorView().post(this::applySafeAreaInsets);
 
