@@ -100,6 +100,11 @@ class CallService : LifecycleService() {
         fun setTorch(enabled: Boolean): Boolean = current?.setTorchEnabled(enabled) ?: false
 
         @JvmStatic
+        fun reassertCamera() {
+            current?.restartCameraAfterResume()
+        }
+
+        @JvmStatic
         fun attachCameraPreview(renderer: TextureViewRenderer?) {
             pendingCameraPreview = renderer
             current?.attachCameraRenderer(renderer)
@@ -141,6 +146,7 @@ class CallService : LifecycleService() {
     private var torchEnabled = false
     private var torchResetJob: Job? = null
     private var cameraProvider: CameraCapturerUtils.CameraProvider? = null
+    private var cameraRestartInProgress = false
     private var cameraPreview: TextureViewRenderer? = null
     private var cameraPreviewInitialized = false
     private var networkCallbackRegisteredAt = 0L
@@ -755,6 +761,63 @@ class CallService : LifecycleService() {
         }
     }
 
+    private fun restartCameraAfterResume() {
+        if (!cameraEnabled || cameraRestartInProgress) {
+            return
+        }
+
+        val participant = room?.localParticipant ?: return
+        cameraRestartInProgress = true
+        scope.launch {
+            try {
+                Log.i("OndaCall", "Reasserting camera after app resume.")
+                clearTorchMode()
+                cameraEnabled = false
+                participant.setCameraEnabled(false)
+                delay(400)
+
+                if (room?.localParticipant !== participant) {
+                    return@launch
+                }
+
+                cameraEnabled = true
+                participant.setCameraEnabled(true)
+
+                var track: LocalVideoTrack? = null
+                for (attempt in 0 until 20) {
+                    val publication = participant.getTrackPublication(Track.Source.CAMERA)
+                    track = publication?.track as? LocalVideoTrack
+                    if (track != null) {
+                        break
+                    }
+                    delay(100)
+                }
+
+                localVideoTrack = track
+                if (track != null && activeCameraId != null) {
+                    try {
+                        track.switchCamera(activeCameraId, cameraPosition)
+                    } catch (error: Exception) {
+                        Log.w("OndaCall", "Could not restore camera after resume.", error)
+                    }
+                }
+
+                attachCameraRenderer(cameraPreview)
+                postMediaState()
+                startForegroundCompat(buildNotification(notificationText()))
+                cameraStateListener?.onCameraStateChanged(cameraEnabled)
+                Log.i("OndaCall", "Camera reasserted: ${track != null}")
+            } catch (error: Exception) {
+                cameraEnabled = false
+                postMediaState()
+                cameraStateListener?.onCameraStateChanged(false)
+                Log.e("OndaCall", "Could not reassert camera after resume.", error)
+            } finally {
+                cameraRestartInProgress = false
+            }
+        }
+    }
+
     private fun attachCameraRenderer(renderer: TextureViewRenderer?) {
         if (cameraPreview !== renderer) {
             val previous = cameraPreview
@@ -807,6 +870,8 @@ class CallService : LifecycleService() {
         heartbeatJob = scope.launch {
             while (isActive) {
                 postPresence("native")
+                postMediaState()
+                postSpeakingState(localSpeaking)
                 delay(30_000)
             }
         }

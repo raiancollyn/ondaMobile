@@ -10,6 +10,7 @@ import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.util.Log;
 import android.util.Rational;
 import android.view.Gravity;
@@ -44,6 +45,7 @@ public class MainActivity extends BridgeActivity {
     private View navigationBarScrim;
     private boolean insetsListenerInstalled;
     private boolean isInPipMode;
+    private long lastPausedAt;
     private int appliedTopInset = -1;
     private int appliedBottomInset = -1;
     private TextureViewRenderer cameraPreview;
@@ -168,6 +170,24 @@ public class MainActivity extends BridgeActivity {
         }
 
         startCallService();
+    }
+
+    @Override
+    public void onPause() {
+        super.onPause();
+        lastPausedAt = SystemClock.elapsedRealtime();
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+
+        long backgroundFor = lastPausedAt > 0
+            ? SystemClock.elapsedRealtime() - lastPausedAt
+            : 0;
+        if (backgroundFor > 1500 && CallService.isCallActive()) {
+            getWindow().getDecorView().postDelayed(CallService::reassertCamera, 1500);
+        }
     }
 
     @Override
