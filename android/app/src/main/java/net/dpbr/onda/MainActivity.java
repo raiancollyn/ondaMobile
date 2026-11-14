@@ -58,6 +58,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(OndaMediaPlugin.class);
         super.onCreate(savedInstanceState);
+        CallService.dismissStaleNotification(getApplicationContext());
         installSystemBarScrims();
         installWindowInsetsListener();
         getWindow().getDecorView().post(this::applySafeAreaInsets);
@@ -191,6 +192,7 @@ public class MainActivity extends BridgeActivity {
         callIntent.putExtra(CallService.EXTRA_CAMERA_HEIGHT, pendingCameraHeight);
         callIntent.putExtra(CallService.EXTRA_CAMERA_FRAME_RATE, pendingCameraFrameRate);
         callIntent.putExtra(CallService.EXTRA_CAMERA_BITRATE, pendingCameraBitrate);
+        callIntent.putExtra(CallService.EXTRA_START_NONCE, CallService.getProcessNonce());
         ContextCompat.startForegroundService(this, callIntent);
     }
 

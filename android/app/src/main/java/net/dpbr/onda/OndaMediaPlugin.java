@@ -74,7 +74,8 @@ public class OndaMediaPlugin extends Plugin {
                 .putExtra(CallService.EXTRA_CAMERA_WIDTH, cameraWidth)
                 .putExtra(CallService.EXTRA_CAMERA_HEIGHT, cameraHeight)
                 .putExtra(CallService.EXTRA_CAMERA_FRAME_RATE, cameraFrameRate)
-                .putExtra(CallService.EXTRA_CAMERA_BITRATE, cameraBitrate);
+                .putExtra(CallService.EXTRA_CAMERA_BITRATE, cameraBitrate)
+                .putExtra(CallService.EXTRA_START_NONCE, CallService.getProcessNonce());
             ContextCompat.startForegroundService(getContext(), intent);
         }
         call.resolve(new JSObject().put("started", true));

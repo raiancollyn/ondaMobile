@@ -5,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.hardware.camera2.CameraCharacteristics
@@ -61,11 +62,17 @@ class CallService : LifecycleService() {
         const val EXTRA_CAMERA_HEIGHT = "net.dpbr.onda.extra.CAMERA_HEIGHT"
         const val EXTRA_CAMERA_FRAME_RATE = "net.dpbr.onda.extra.CAMERA_FRAME_RATE"
         const val EXTRA_CAMERA_BITRATE = "net.dpbr.onda.extra.CAMERA_BITRATE"
+        const val EXTRA_START_NONCE = "net.dpbr.onda.extra.START_NONCE"
         private const val CHANNEL_ID = "onda_call"
         private const val NOTIFICATION_ID = 1001
 
         @Volatile
         private var current: CallService? = null
+
+        private val processNonce = java.util.UUID.randomUUID().toString()
+
+        @JvmStatic
+        fun getProcessNonce(): String = processNonce
 
         @Volatile
         private var pendingCameraPreview: TextureViewRenderer? = null
@@ -77,6 +84,23 @@ class CallService : LifecycleService() {
 
         @JvmStatic
         fun isCallActive(): Boolean = current != null
+
+        @JvmStatic
+        fun dismissStaleNotification(context: Context) {
+            val service = current
+            if (service == null) {
+                context.stopService(Intent(context, CallService::class.java))
+                context.getSystemService(NotificationManager::class.java)
+                    ?.cancel(NOTIFICATION_ID)
+                return
+            }
+
+            if (service.room == null && !service.connecting) {
+                service.stopSelf()
+                context.getSystemService(NotificationManager::class.java)
+                    ?.cancel(NOTIFICATION_ID)
+            }
+        }
 
         @JvmStatic
         fun isMicrophoneEnabled(): Boolean = current?.microphoneEnabled ?: false
@@ -245,41 +269,66 @@ class CallService : LifecycleService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
 
-        if (intent?.action == ACTION_STOP) {
+        if (intent == null) {
+            // The system recreated the service without a call request. Do not
+            // leave a foreground notification for a room that no longer exists.
             stopSelf()
             return START_NOT_STICKY
         }
 
-        if (intent?.action == ACTION_TOGGLE_MIC) {
+        if (intent.action == ACTION_STOP) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
+        if (intent.action == ACTION_TOGGLE_MIC) {
+            if (room == null) {
+                stopSelf()
+                return START_NOT_STICKY
+            }
             startForegroundCompat(buildNotification(notificationText()))
             setMicrophoneEnabled(!microphoneEnabled)
             return START_NOT_STICKY
         }
 
-        if (intent?.action == ACTION_DISABLE_CAMERA) {
+        if (intent.action == ACTION_DISABLE_CAMERA) {
+            if (room == null) {
+                stopSelf()
+                return START_NOT_STICKY
+            }
             startForegroundCompat(buildNotification(notificationText()))
             setCameraEnabled(false)
             return START_NOT_STICKY
         }
 
-        startForegroundCompat(buildNotification(notificationText()))
-
-        roomId = intent?.getStringExtra(EXTRA_ROOM_ID)
-        guestId = intent?.getStringExtra(EXTRA_GUEST_ID)
-        guestName = intent?.getStringExtra(EXTRA_GUEST_NAME)
-        guestAvatarTone = intent?.getIntExtra(EXTRA_AVATAR_TONE, 0) ?: 0
-        presenceUrl = intent?.getStringExtra(EXTRA_PRESENCE_URL)
-        cameraCaptureWidth = intent?.getIntExtra(EXTRA_CAMERA_WIDTH, 1280) ?: 1280
-        cameraCaptureHeight = intent?.getIntExtra(EXTRA_CAMERA_HEIGHT, 720) ?: 720
-        cameraFrameRate = intent?.getIntExtra(EXTRA_CAMERA_FRAME_RATE, 30) ?: 30
-        cameraBitrateKbps = intent?.getIntExtra(EXTRA_CAMERA_BITRATE, 1500) ?: 1500
-
-        val url = intent?.getStringExtra(EXTRA_URL)
-        val token = intent?.getStringExtra(EXTRA_TOKEN)
-        if (!url.isNullOrBlank() && !token.isNullOrBlank()) {
-            connectToLiveKit(url, token)
+        if (intent.getStringExtra(EXTRA_START_NONCE) != processNonce) {
+            // This intent survived a process/package restart; it is not a
+            // current call request.
+            stopSelf()
+            return START_NOT_STICKY
         }
 
+        roomId = intent.getStringExtra(EXTRA_ROOM_ID)
+        guestId = intent.getStringExtra(EXTRA_GUEST_ID)
+        guestName = intent.getStringExtra(EXTRA_GUEST_NAME)
+        guestAvatarTone = intent.getIntExtra(EXTRA_AVATAR_TONE, 0)
+        presenceUrl = intent.getStringExtra(EXTRA_PRESENCE_URL)
+        cameraCaptureWidth = intent.getIntExtra(EXTRA_CAMERA_WIDTH, 1280)
+        cameraCaptureHeight = intent.getIntExtra(EXTRA_CAMERA_HEIGHT, 720)
+        cameraFrameRate = intent.getIntExtra(EXTRA_CAMERA_FRAME_RATE, 30)
+        cameraBitrateKbps = intent.getIntExtra(EXTRA_CAMERA_BITRATE, 1500)
+
+        val url = intent.getStringExtra(EXTRA_URL)
+        val token = intent.getStringExtra(EXTRA_TOKEN)
+        if (url.isNullOrBlank() || token.isNullOrBlank()) {
+            // A bare ACTION_START has no room to join; it should not keep an
+            // ongoing-call notification alive.
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
+        startForegroundCompat(buildNotification(notificationText()))
+        connectToLiveKit(url, token)
         return START_NOT_STICKY
     }
 
@@ -428,6 +477,11 @@ class CallService : LifecycleService() {
 
     override fun onDestroy() {
         clearTorchMode()
+        try {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } catch (error: Exception) {
+            Log.w("OndaCall", "Could not remove call notification.", error)
+        }
         cameraProvider?.let { provider ->
             CameraCapturerUtils.unregisterCameraProvider(provider)
             cameraProvider = null
