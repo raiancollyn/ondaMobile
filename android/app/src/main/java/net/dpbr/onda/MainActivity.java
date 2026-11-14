@@ -43,6 +43,7 @@ public class MainActivity extends BridgeActivity {
     private View statusBarScrim;
     private View navigationBarScrim;
     private boolean insetsListenerInstalled;
+    private boolean isInPipMode;
     private int appliedTopInset = -1;
     private int appliedBottomInset = -1;
     private TextureViewRenderer cameraPreview;
@@ -230,6 +231,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onPictureInPictureModeChanged(boolean isInPip, Configuration configuration) {
         super.onPictureInPictureModeChanged(isInPip, configuration);
+        isInPipMode = isInPip;
 
         if (getBridge() == null || getBridge().getWebView() == null) {
             return;
@@ -246,6 +248,7 @@ public class MainActivity extends BridgeActivity {
             );
 
             if (isInPip) {
+                updateSystemBarScrims(0, 0);
                 applyWebViewInsets(0, 0);
             } else {
                 applySafeAreaInsets();
@@ -267,6 +270,12 @@ public class MainActivity extends BridgeActivity {
 
     private void applySafeAreaInsets() {
         if (getBridge() == null || getBridge().getWebView() == null) {
+            return;
+        }
+
+        if (isInPipMode) {
+            updateSystemBarScrims(0, 0);
+            applyWebViewInsets(0, 0);
             return;
         }
 
@@ -310,6 +319,11 @@ public class MainActivity extends BridgeActivity {
             return;
         }
 
+        if (isInPipMode) {
+            topPx = 0;
+            bottomPx = 0;
+        }
+
         if (topPx == appliedTopInset && bottomPx == appliedBottomInset) {
             return;
         }
@@ -340,8 +354,8 @@ public class MainActivity extends BridgeActivity {
         insetsListenerInstalled = true;
         View decor = getWindow().getDecorView();
         ViewCompat.setOnApplyWindowInsetsListener(decor, (view, insets) -> {
-            int top = insets.getInsets(WindowInsetsCompat.Type.systemBars()).top;
-            int bottom = insets.getInsets(WindowInsetsCompat.Type.systemBars()).bottom;
+            int top = isInPipMode ? 0 : insets.getInsets(WindowInsetsCompat.Type.systemBars()).top;
+            int bottom = isInPipMode ? 0 : insets.getInsets(WindowInsetsCompat.Type.systemBars()).bottom;
             updateSystemBarScrims(top, bottom);
             applyWebViewInsets(top, bottom);
             return insets;
