@@ -8,6 +8,7 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.SystemClock;
@@ -33,6 +34,7 @@ public class MainActivity extends BridgeActivity {
     private static final int DARK_SCRIM = Color.rgb(12, 25, 22);
     private static final int LIGHT_SCRIM = Color.rgb(247, 243, 235);
     private boolean bridgeProbeScheduled;
+    private String pendingDeepLinkUrl;
     private boolean startCallWhenGranted;
     private String pendingCallUrl;
     private String pendingCallToken;
@@ -58,6 +60,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(OndaMediaPlugin.class);
         super.onCreate(savedInstanceState);
+        handleDeepLink(getIntent());
         CallService.dismissStaleNotification(getApplicationContext());
         installSystemBarScrims();
         installWindowInsetsListener();
@@ -233,8 +236,55 @@ public class MainActivity extends BridgeActivity {
     }
 
     @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleDeepLink(intent);
+    }
+
+    private void handleDeepLink(Intent intent) {
+        Uri data = intent != null ? intent.getData() : null;
+        if (data == null ||
+            !"onda".equals(data.getScheme()) ||
+            !"sala".equals(data.getHost())) {
+            return;
+        }
+
+        java.util.List<String> segments = data.getPathSegments();
+        if (segments.isEmpty() || segments.get(0).isEmpty()) {
+            return;
+        }
+
+        StringBuilder target = new StringBuilder("https://onda.dpbr.net/sala/")
+            .append(Uri.encode(segments.get(0)));
+        String handoff = data.getQueryParameter("handoff");
+        if (handoff != null && !handoff.isEmpty()) {
+            target.append("?handoff=").append(Uri.encode(handoff));
+        }
+
+        CallService.stopCurrentCall();
+        pendingDeepLinkUrl = target.toString();
+        loadPendingDeepLink();
+    }
+
+    private void loadPendingDeepLink() {
+        if (pendingDeepLinkUrl == null) {
+            return;
+        }
+
+        if (getBridge() == null || getBridge().getWebView() == null) {
+            return;
+        }
+
+        getBridge().getWebView().loadUrl(pendingDeepLinkUrl);
+        pendingDeepLinkUrl = null;
+    }
+
+    @Override
     public void onStart() {
         super.onStart();
+
+        loadPendingDeepLink();
 
         if (getBridge() == null || getBridge().getWebView() == null) {
             return;

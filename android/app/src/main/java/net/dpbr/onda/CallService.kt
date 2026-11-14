@@ -86,6 +86,11 @@ class CallService : LifecycleService() {
         fun isCallActive(): Boolean = current != null
 
         @JvmStatic
+        fun stopCurrentCall() {
+            current?.stopSelf()
+        }
+
+        @JvmStatic
         fun dismissStaleNotification(context: Context) {
             val service = current
             if (service == null) {
