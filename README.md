@@ -62,6 +62,7 @@ Integração web → nativo validada em produção:
 - seleção de alto-falante, auricular, Bluetooth e fone com fio;
 - câmera nativa publicada na sala;
 - foreground service do tipo `camera` mantém a câmera ativa com a tela desligada;
+- modo picture-in-picture ao sair do app, com foco no participante que está falando;
 - vídeos remotos renderizados no app por uma conexão de vídeo separada;
 
 Ainda não implementado:

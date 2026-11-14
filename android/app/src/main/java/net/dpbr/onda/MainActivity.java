@@ -1,13 +1,17 @@
 package net.dpbr.onda;
 
 import android.Manifest;
+import android.app.PictureInPictureParams;
 import android.content.Intent;
+import android.content.res.Configuration;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
+import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
+import android.util.Rational;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowInsets;
@@ -203,6 +207,50 @@ public class MainActivity extends BridgeActivity {
                 );
             }, 2500);
         }, 8000);
+    }
+
+    @Override
+    public void onUserLeaveHint() {
+        super.onUserLeaveHint();
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            CallService.isCallActive() &&
+            !isInPictureInPictureMode()) {
+            try {
+                PictureInPictureParams params = new PictureInPictureParams.Builder()
+                    .setAspectRatio(new Rational(16, 9))
+                    .build();
+                enterPictureInPictureMode(params);
+            } catch (Exception error) {
+                Log.w("OndaPip", "Não foi possível entrar em picture-in-picture.", error);
+            }
+        }
+    }
+
+    @Override
+    public void onPictureInPictureModeChanged(boolean isInPip, Configuration configuration) {
+        super.onPictureInPictureModeChanged(isInPip, configuration);
+
+        if (getBridge() == null || getBridge().getWebView() == null) {
+            return;
+        }
+
+        getBridge().getWebView().post(() -> {
+            if (getBridge() == null || getBridge().getWebView() == null) {
+                return;
+            }
+
+            getBridge().getWebView().evaluateJavascript(
+                "window.onda && window.onda.setPipMode(" + isInPip + ");",
+                null
+            );
+
+            if (isInPip) {
+                applyWebViewInsets(0, 0);
+            } else {
+                applySafeAreaInsets();
+            }
+        });
     }
 
     @Override

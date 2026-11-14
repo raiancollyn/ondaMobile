@@ -61,6 +61,9 @@ class CallService : Service() {
         }
 
         @JvmStatic
+        fun isCallActive(): Boolean = current != null
+
+        @JvmStatic
         fun isMicrophoneEnabled(): Boolean = current?.microphoneEnabled ?: false
 
         @JvmStatic
