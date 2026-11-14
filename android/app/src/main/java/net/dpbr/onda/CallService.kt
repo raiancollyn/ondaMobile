@@ -12,6 +12,7 @@ import android.net.Network
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import io.livekit.android.LiveKit
@@ -50,6 +51,9 @@ class CallService : Service() {
         @Volatile
         private var current: CallService? = null
 
+        @Volatile
+        private var pendingCameraPreview: TextureViewRenderer? = null
+
         @JvmStatic
         fun setMicrophone(enabled: Boolean) {
             current?.setMicrophoneEnabled(enabled)
@@ -68,6 +72,7 @@ class CallService : Service() {
 
         @JvmStatic
         fun attachCameraPreview(renderer: TextureViewRenderer?) {
+            pendingCameraPreview = renderer
             current?.attachCameraRenderer(renderer)
         }
 
@@ -104,6 +109,7 @@ class CallService : Service() {
     private var localVideoTrack: LocalVideoTrack? = null
     private var cameraPreview: TextureViewRenderer? = null
     private var cameraPreviewInitialized = false
+    private var networkCallbackRegisteredAt = 0L
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var reconnectJob: Job? = null
     private var wakeLock: PowerManager.WakeLock? = null
@@ -111,6 +117,7 @@ class CallService : Service() {
     override fun onCreate() {
         super.onCreate()
         current = this
+        pendingCameraPreview?.let { attachCameraRenderer(it) }
         acquireWakeLock()
         createNotificationChannel()
     }
@@ -201,11 +208,15 @@ class CallService : Service() {
             val connectivity = getSystemService(ConnectivityManager::class.java) ?: return
             val callback = object : ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: Network) {
+                    if (SystemClock.elapsedRealtime() - networkCallbackRegisteredAt < 3000L) {
+                        return
+                    }
                     Log.i("OndaCall", "Network available; scheduling LiveKit reconnect.")
                     scheduleReconnect()
                 }
             }
             connectivity.registerDefaultNetworkCallback(callback)
+            networkCallbackRegisteredAt = SystemClock.elapsedRealtime()
             networkCallback = callback
         } catch (error: Exception) {
             Log.w("OndaCall", "Could not register network callback.", error)
@@ -384,10 +395,17 @@ class CallService : Service() {
             try {
                 participant.setCameraEnabled(enabled)
                 if (enabled) {
-                    val track = participant
-                        .getTrackPublication(Track.Source.CAMERA)
-                        ?.track as? LocalVideoTrack
+                    var track: LocalVideoTrack? = null
+                    for (attempt in 0 until 20) {
+                        val publication = participant.getTrackPublication(Track.Source.CAMERA)
+                        track = publication?.track as? LocalVideoTrack
+                        if (track != null) {
+                            break
+                        }
+                        delay(100)
+                    }
                     localVideoTrack = track
+                    Log.i("OndaCall", "Camera track available: ${track != null}")
                     attachCameraRenderer(cameraPreview)
                     Log.i("OndaCall", "Camera enabled.")
                 } else {
@@ -421,6 +439,7 @@ class CallService : Service() {
         val currentRenderer = renderer ?: return
         val track = localVideoTrack ?: return
         try {
+            Log.i("OndaCall", "Camera preview attach: initialized=$cameraPreviewInitialized")
             if (!cameraPreviewInitialized) {
                 room?.initVideoRenderer(currentRenderer)
                 cameraPreviewInitialized = true

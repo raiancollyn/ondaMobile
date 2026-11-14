@@ -6,7 +6,6 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
-import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.Gravity;
@@ -54,6 +53,9 @@ public class MainActivity extends BridgeActivity {
         getWindow().getDecorView().post(this::applySafeAreaInsets);
 
         boolean debuggable = (getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+        if (debuggable && getIntent().getBooleanExtra("onda_test_camera", false)) {
+            getWindow().getDecorView().postDelayed(() -> CallService.setCamera(true), 5000);
+        }
         if (debuggable && getIntent().getBooleanExtra("onda_test_call", false)) {
             startCallWithPermissions(
                 getIntent().getStringExtra("onda_test_url"),
@@ -305,15 +307,10 @@ public class MainActivity extends BridgeActivity {
         }
 
         cameraPreview = new TextureViewRenderer(this);
-        cameraPreview.setVisibility(View.GONE);
         cameraPreview.setMirror(true);
         cameraPreview.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL);
         cameraPreview.setEnableHardwareScaler(true);
-        GradientDrawable previewBackground = new GradientDrawable();
-        previewBackground.setColor(Color.BLACK);
-        previewBackground.setCornerRadius(dp(14));
-        cameraPreview.setBackground(previewBackground);
-        cameraPreview.setClipToOutline(true);
+        cameraPreview.setTranslationY(dp(320));
 
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(dp(116), dp(154));
         params.gravity = Gravity.BOTTOM | Gravity.END;
@@ -324,7 +321,10 @@ public class MainActivity extends BridgeActivity {
         CallService.attachCameraPreview(cameraPreview);
         CallService.cameraStateListener = enabled -> runOnUiThread(() -> {
             if (cameraPreview != null) {
-                cameraPreview.setVisibility(enabled ? View.VISIBLE : View.GONE);
+                cameraPreview.animate()
+                    .translationY(enabled ? 0 : dp(320))
+                    .setDuration(180)
+                    .start();
             }
         });
     }
