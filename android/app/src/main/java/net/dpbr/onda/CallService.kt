@@ -343,8 +343,11 @@ class CallService : Service() {
         }
     }
 
-    private fun notificationText(): String =
-        if (microphoneEnabled) statusText else "Microfone silenciado"
+    private fun notificationText(): String = when {
+        !microphoneEnabled -> "Microfone silenciado"
+        cameraEnabled -> "Chamada de voz e câmera em andamento"
+        else -> statusText
+    }
 
     private fun audioDevices(): List<Map<String, Any?>>? {
         val handler = room?.audioSwitchHandler ?: return null
@@ -410,10 +413,12 @@ class CallService : Service() {
                     Log.i("OndaCall", "Camera track available: ${track != null}")
                     attachCameraRenderer(cameraPreview)
                     postMediaState()
+                    startForegroundCompat(buildNotification(notificationText()))
                     Log.i("OndaCall", "Camera enabled.")
                 } else {
                     detachCameraTrack()
                     postMediaState()
+                    startForegroundCompat(buildNotification(notificationText()))
                     Log.i("OndaCall", "Camera disabled.")
                 }
             } catch (error: Exception) {
@@ -421,6 +426,7 @@ class CallService : Service() {
                 cameraEnabled = false
                 detachCameraTrack()
                 postMediaState()
+                startForegroundCompat(buildNotification(notificationText()))
             }
 
             cameraStateListener?.onCameraStateChanged(cameraEnabled)
@@ -557,7 +563,11 @@ class CallService : Service() {
     private fun startForegroundCompat(notification: Notification) {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+                var types = ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && cameraEnabled) {
+                    types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+                }
+                startForeground(NOTIFICATION_ID, notification, types)
             } else {
                 startForeground(NOTIFICATION_ID, notification)
             }

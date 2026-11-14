@@ -60,7 +60,8 @@ Integração web → nativo validada em produção:
 - wake lock parcial durante a chamada;
 - tarjas nativas no topo e na base para as barras do sistema;
 - seleção de alto-falante, auricular, Bluetooth e fone com fio;
-- câmera nativa com preview local e publicação para a sala;
+- câmera nativa publicada na sala;
+- foreground service do tipo `camera` mantém a câmera ativa com a tela desligada;
 - vídeos remotos renderizados no app por uma conexão de vídeo separada;
 
 Ainda não implementado:
