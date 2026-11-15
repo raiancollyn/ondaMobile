@@ -82,8 +82,11 @@ class RnnoiseProcessor : AudioProcessorInterface {
                 outputBuffer = ShortArray(sampleCount)
             }
 
+            // O LiveKit entrega Full-band como FloatS16 ([-32768, 32767]),
+            // não como float normalizado. Converter direto para Short evita
+            // clipping e o chiado alto.
             for (index in 0 until sampleCount) {
-                inputBuffer[index] = (source.get(index) * 32767f)
+                inputBuffer[index] = source.get(index)
                     .toInt()
                     .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
                     .toShort()
@@ -94,7 +97,7 @@ class RnnoiseProcessor : AudioProcessorInterface {
             buffer.rewind()
             val target = buffer.asFloatBuffer()
             for (index in 0 until sampleCount) {
-                target.put(index, outputBuffer[index] / 32767f)
+                target.put(index, outputBuffer[index].toFloat())
             }
             buffer.position(0)
         } catch (error: Throwable) {
