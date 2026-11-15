@@ -8,8 +8,8 @@ android {
         applicationId "net.dpbr.onda"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 30
-        versionName "0.2.10"
+        versionCode 31
+        versionName "0.2.11"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -60,6 +60,7 @@ dependencies {
     implementation project(':capacitor-android')
     implementation "io.livekit:livekit-android:2.18.2"
     implementation "io.livekit:livekit-android-camerax:2.18.2"
+    implementation "com.github.rizukirr.audx-android:audx:v2.1.3"
     implementation "androidx.lifecycle:lifecycle-service:2.9.4"
     implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2"
     testImplementation "junit:junit:$junitVersion"

@@ -141,21 +141,11 @@ class CallService : LifecycleService() {
         fun isMicrophoneEnabled(): Boolean = current?.microphoneEnabled ?: false
 
         @JvmStatic
-        fun isNoiseSuppressionEnabled(): Boolean = current?.noiseSuppressionEnabled ?: true
+        fun isRnnoiseEnabled(): Boolean = current?.rnnoiseEnabled ?: true
 
         @JvmStatic
-        fun isEchoCancellationEnabled(): Boolean = current?.echoCancellationEnabled ?: true
-
-        @JvmStatic
-        fun getAudioProcessingIntensity(): String = current?.audioProcessingIntensity ?: "standard"
-
-        @JvmStatic
-        fun setAudioProcessing(
-            noiseSuppression: Boolean,
-            echoCancellation: Boolean,
-            intensity: String
-        ) {
-            current?.updateAudioProcessing(noiseSuppression, echoCancellation, intensity)
+        fun setRnnoise(enabled: Boolean) {
+            current?.updateRnnoise(enabled)
         }
 
         @JvmStatic
@@ -237,9 +227,8 @@ class CallService : LifecycleService() {
     private var liveKitUrl: String? = null
     private var liveKitToken: String? = null
     private var microphoneEnabled = true
-    private var noiseSuppressionEnabled = true
-    private var echoCancellationEnabled = true
-    private var audioProcessingIntensity = "standard"
+    private var rnnoiseEnabled = true
+    private val rnnoiseProcessor = RnnoiseProcessor()
     private var cameraEnabled = false
     private var screenShareEnabled = false
     private var screenShareJob: Job? = null
@@ -304,9 +293,8 @@ class CallService : LifecycleService() {
     }
 
     private fun loadAudioPreferences() {
-        noiseSuppressionEnabled = audioPreferences.getBoolean("noiseSuppression", true)
-        echoCancellationEnabled = audioPreferences.getBoolean("echoCancellation", true)
-        audioProcessingIntensity = audioPreferences.getString("intensity", "standard") ?: "standard"
+        rnnoiseEnabled = audioPreferences.getBoolean("rnnoise", true)
+        rnnoiseProcessor.setEnabled(rnnoiseEnabled)
     }
 
     private fun loadCameraPreferences() {        val prefs = cameraPreferences
@@ -981,6 +969,7 @@ class CallService : LifecycleService() {
         unregisterAudioCallbacks()
         abandonCallAudioFocus()
         unregisterCameraAvailabilityCallback()
+        rnnoiseProcessor.close()
         try {
             stopForeground(STOP_FOREGROUND_REMOVE)
         } catch (error: Exception) {
@@ -1242,53 +1231,33 @@ class CallService : LifecycleService() {
     }
 
     private fun applyAudioProcessing(target: Room) {
-        val aggressive = audioProcessingIntensity == "aggressive"
         val options = LocalAudioTrackOptions(
-            noiseSuppression = noiseSuppressionEnabled,
-            echoCancellation = echoCancellationEnabled,
-            autoGainControl = !aggressive,
-            highPassFilter = audioProcessingIntensity != "soft",
-            typingNoiseDetection = aggressive
+            // O RNNoise substitui a supressão nativa. O cancelamento de eco
+            // continua ativo: RNNoise não faz AEC.
+            noiseSuppression = false,
+            echoCancellation = true,
+            autoGainControl = true,
+            highPassFilter = true,
+            typingNoiseDetection = false
         )
         target.audioTrackCaptureDefaults = options
         target.localParticipant.audioTrackCaptureDefaults = options
+        target.audioProcessingController.setCapturePostProcessing(rnnoiseProcessor)
+        target.audioProcessingController.setBypassForCapturePostProcessing(!rnnoiseEnabled)
+        rnnoiseProcessor.setEnabled(rnnoiseEnabled)
         Log.i(
             "OndaCall",
-            "Audio processing: noise=$noiseSuppressionEnabled echo=$echoCancellationEnabled intensity=$audioProcessingIntensity"
+            "Audio processing: RNNoise=$rnnoiseEnabled echo=true (RNNoise no capture post)"
         )
     }
 
-    private fun updateAudioProcessing(
-        noiseSuppression: Boolean,
-        echoCancellation: Boolean,
-        intensity: String
-    ) {
-        noiseSuppressionEnabled = noiseSuppression
-        echoCancellationEnabled = echoCancellation
-        audioProcessingIntensity = when (intensity) {
-            "soft", "aggressive" -> intensity
-            else -> "standard"
-        }
-        audioPreferences.edit()
-            .putBoolean("noiseSuppression", noiseSuppression)
-            .putBoolean("echoCancellation", echoCancellation)
-            .putString("intensity", audioProcessingIntensity)
-            .apply()
+    private fun updateRnnoise(enabled: Boolean) {
+        rnnoiseEnabled = enabled
+        rnnoiseProcessor.setEnabled(enabled)
+        audioPreferences.edit().putBoolean("rnnoise", enabled).apply()
 
-        room?.let { applyAudioProcessing(it) }
-        if (room != null && microphoneEnabled) {
-            scope.launch {
-                try {
-                    room?.localParticipant?.setMicrophoneEnabled(false)
-                    delay(180)
-                    room?.localParticipant?.setMicrophoneEnabled(true)
-                    postMediaState()
-                    Log.i("OndaCall", "Microphone republished with new audio processing.")
-                } catch (error: Exception) {
-                    Log.w("OndaCall", "Could not apply audio processing.", error)
-                }
-            }
-        }
+        room?.audioProcessingController?.setBypassForCapturePostProcessing(!enabled)
+        Log.i("OndaCall", "RNNoise ${if (enabled) "enabled" else "disabled"}.")
     }
 
     private fun setCameraEnabled(enabled: Boolean) {
