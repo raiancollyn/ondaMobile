@@ -283,7 +283,7 @@ public class MainActivity extends BridgeActivity {
         activeChatNotificationIds.add(notificationId);
 
         NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHAT_NOTIFICATION_CHANNEL)
-            .setSmallIcon(android.R.drawable.ic_dialog_email)
+            .setSmallIcon(R.drawable.ic_stat_onda)
             .setContentTitle(safeSender)
             .setContentText(safeText)
             .setStyle(new NotificationCompat.BigTextStyle().bigText(safeText))
@@ -301,7 +301,7 @@ public class MainActivity extends BridgeActivity {
         int count = activeChatNotificationIds.size();
         String summaryText = count == 1 ? "1 nova mensagem" : count + " novas mensagens";
         NotificationCompat.Builder summary = new NotificationCompat.Builder(this, CHAT_NOTIFICATION_CHANNEL)
-            .setSmallIcon(android.R.drawable.ic_dialog_email)
+            .setSmallIcon(R.drawable.ic_stat_onda)
             .setContentTitle("Onda")
             .setContentText(summaryText)
             .setStyle(new NotificationCompat.BigTextStyle().bigText(summaryText))

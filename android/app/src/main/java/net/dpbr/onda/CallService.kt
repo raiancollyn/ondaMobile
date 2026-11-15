@@ -1967,7 +1967,7 @@ class CallService : LifecycleService() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_menu_camera)
+            .setSmallIcon(R.drawable.ic_stat_onda)
             .setContentTitle("Compartilhando a tela")
             .setContentText("Toque para voltar à sala")
             .setContentIntent(openPending)
@@ -2026,7 +2026,7 @@ class CallService : LifecycleService() {
         )
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_menu_call)
+            .setSmallIcon(R.drawable.ic_stat_onda)
             .setContentTitle("Onda")
             .setContentText(text)
             .setContentIntent(openPending)
