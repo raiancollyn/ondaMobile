@@ -1145,11 +1145,6 @@ class CallService : LifecycleService() {
         screenShareJob?.cancel()
         screenShareJob = scope.launch {
             try {
-                if (cameraEnabled) {
-                    setCameraEnabled(false)
-                    delay(350)
-                }
-
                 val participant = room?.localParticipant
                 if (participant == null) {
                     screenShareResultData = null
@@ -1297,12 +1292,6 @@ class CallService : LifecycleService() {
     }
 
     private fun setCameraEnabled(enabled: Boolean) {
-        if (enabled && screenShareEnabled) {
-            // Only one presentation source is shown at a time. Starting the
-            // camera stops the active screen share.
-            stopScreenShare()
-        }
-
         if (enabled == cameraEnabled && (!enabled || localVideoTrack != null)) {
             if (enabled) {
                 attachCameraRenderer(cameraPreview)
