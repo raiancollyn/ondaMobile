@@ -20,6 +20,7 @@ class RnnoiseProcessor : AudioProcessorInterface {
     private var channels = 1
     private var inputBuffer = ShortArray(0)
     private var outputBuffer = ShortArray(0)
+    private var frameCount = 0L
 
     fun setEnabled(value: Boolean) {
         enabled = value
@@ -93,6 +94,29 @@ class RnnoiseProcessor : AudioProcessorInterface {
             }
 
             processor.process(inputBuffer, outputBuffer) { }
+
+            var inputPeak = 0
+            var outputPeak = 0
+            for (index in 0 until sampleCount) {
+                inputPeak = maxOf(inputPeak, kotlin.math.abs(inputBuffer[index].toInt()))
+                outputPeak = maxOf(outputPeak, kotlin.math.abs(outputBuffer[index].toInt()))
+            }
+
+            // Proteção contra versões do Audx que devolvem silêncio em alguns
+            // aparelhos. Se a voz entrou com energia e o RNNoise devolveu
+            // praticamente nada, mantém o sinal original para não derrubar a
+            // chamada.
+            if (inputPeak > 300 && outputPeak < maxOf(20, inputPeak / 20)) {
+                System.arraycopy(inputBuffer, 0, outputBuffer, 0, sampleCount)
+            }
+
+            frameCount++
+            if (frameCount == 1L || frameCount % 100L == 0L) {
+                Log.i(
+                    TAG,
+                    "frames=$frameCount inPeak=$inputPeak outPeak=$outputPeak"
+                )
+            }
 
             buffer.rewind()
             val target = buffer.asFloatBuffer()
