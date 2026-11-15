@@ -168,3 +168,10 @@ atualização.
 > Quem instalou uma versão anterior à v0.2.8, assinada com outra chave debug,
 > precisa desinstalar uma vez e instalar a v0.2.8. Depois disso, as próximas
 > atualizações assinadas com `onda-debug.keystore` instalam normalmente.
+
+### Manifesto de atualização do APK
+
+O verificador consulta primeiro `https://onda.dpbr.net/updates/android.json`.
+Ao publicar uma nova versão, atualize o arquivo `wwwroot/updates/android.json`
+no projeto web com `version` e `url` do APK. Se o manifesto estiver fora do ar,
+o app tenta a API de releases do GitHub como fallback.

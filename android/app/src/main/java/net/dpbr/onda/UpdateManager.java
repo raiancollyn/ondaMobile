@@ -40,6 +40,8 @@ import java.util.concurrent.Executors;
  */
 final class UpdateManager {
     private static final String TAG = "OndaUpdate";
+    private static final String MANIFEST_URL =
+        "https://onda.dpbr.net/updates/android.json";
     private static final String RELEASES_URL =
         "https://api.github.com/repos/raiancollyn/ondaMobile/releases/latest";
     private static final String APK_MIME = "application/vnd.android.package-archive";
@@ -125,22 +127,31 @@ final class UpdateManager {
     }
 
     void checkForUpdates(boolean manual) {
+        Log.i(TAG, "Verificando atualizações. Versão atual: " + currentVersion());
         executor.execute(() -> {
-            Release release = fetchLatestRelease();
+            Release release = fetchManifestRelease();
+            if (release == null) {
+                release = fetchLatestRelease();
+            }
             if (release == null) {
                 return;
             }
 
             String current = currentVersion();
+            Log.i(TAG, "Última versão encontrada: " + release.tag);
             if (compareVersions(release.tag, current) <= 0) {
+                Log.i(TAG, "Já está na versão mais recente.");
                 return;
             }
 
             if (release.tag.equals(preferences.getString(KEY_SKIPPED, ""))) {
+                Log.i(TAG, "Versão ignorada pelo usuário: " + release.tag);
                 return;
             }
 
-            mainHandler.post(() -> showUpdateDialog(release));
+            Log.i(TAG, "Atualização disponível: " + release.tag);
+            Release available = release;
+            mainHandler.post(() -> showUpdateDialog(available));
         });
     }
 
@@ -167,6 +178,51 @@ final class UpdateManager {
             activity.unregisterReceiver(downloadReceiver);
         } catch (Exception ignored) {
             // O receiver já foi removido com a activity.
+        }
+    }
+
+    private Release fetchManifestRelease() {
+        HttpURLConnection connection = null;
+        try {
+            URL url = new URL(MANIFEST_URL);
+            connection = (HttpURLConnection) url.openConnection();
+            connection.setConnectTimeout(10_000);
+            connection.setReadTimeout(10_000);
+            connection.setRequestProperty("Accept", "application/json");
+            connection.setRequestProperty("User-Agent", "Onda-Android");
+
+            if (connection.getResponseCode() != HttpURLConnection.HTTP_OK) {
+                return null;
+            }
+
+            StringBuilder body = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(
+                connection.getInputStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    body.append(line);
+                }
+            }
+
+            JSONObject manifest = new JSONObject(body.toString());
+            String version = manifest.optString("version", "").trim();
+            String apkUrl = manifest.optString("url", "").trim();
+            if (version.isEmpty() || !apkUrl.startsWith("https://")) {
+                Log.i(TAG, "Manifesto de atualização inválido.");
+                return null;
+            }
+
+            if (!version.startsWith("v") && !version.startsWith("V")) {
+                version = "v" + version;
+            }
+            return new Release(version, apkUrl);
+        } catch (Exception error) {
+            Log.i(TAG, "Manifesto indisponível; usando GitHub: " + error.getMessage());
+            return null;
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
         }
     }
 
