@@ -1,6 +1,9 @@
 package net.dpbr.onda;
 
 import android.Manifest;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.app.PictureInPictureParams;
 import android.content.Intent;
 import android.content.res.Configuration;
@@ -21,6 +24,7 @@ import android.view.WindowInsets;
 import android.widget.FrameLayout;
 import android.widget.Toast;
 import androidx.core.app.ActivityCompat;
+import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
@@ -33,6 +37,8 @@ import livekit.org.webrtc.RendererCommon;
 public class MainActivity extends BridgeActivity {
     private static final int CALL_PERMISSIONS_REQUEST = 42;
     private static final int SCREEN_SHARE_REQUEST = 43;
+    private static final int CHAT_NOTIFICATION_PERMISSION_REQUEST = 44;
+    private static final String CHAT_NOTIFICATION_CHANNEL = "onda_messages";
     private static final int DARK_SCRIM = Color.rgb(12, 25, 22);
     private static final int LIGHT_SCRIM = Color.rgb(247, 243, 235);
     private boolean bridgeProbeScheduled;
@@ -204,6 +210,68 @@ public class MainActivity extends BridgeActivity {
         callIntent.putExtra(CallService.EXTRA_CAMERA_BITRATE, pendingCameraBitrate);
         callIntent.putExtra(CallService.EXTRA_START_NONCE, CallService.getProcessNonce());
         ContextCompat.startForegroundService(this, callIntent);
+    }
+
+    public boolean requestChatNotificationPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            return true;
+        }
+
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+            == PackageManager.PERMISSION_GRANTED) {
+            return true;
+        }
+
+        ActivityCompat.requestPermissions(
+            this,
+            new String[] { Manifest.permission.POST_NOTIFICATIONS },
+            CHAT_NOTIFICATION_PERMISSION_REQUEST);
+        return false;
+    }
+
+    public void showChatNotification(String sender, String text, String roomCode) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED) {
+            return;
+        }
+
+        NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        if (manager == null) {
+            return;
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel channel = new NotificationChannel(
+                CHAT_NOTIFICATION_CHANNEL,
+                "Mensagens da sala",
+                NotificationManager.IMPORTANCE_DEFAULT);
+            channel.setDescription("Mensagens recebidas enquanto o Onda não está em foco.");
+            manager.createNotificationChannel(channel);
+        }
+
+        Intent openIntent = new Intent(this, MainActivity.class)
+            .setAction(Intent.ACTION_VIEW)
+            .setData(Uri.parse("onda://sala/" + Uri.encode(roomCode)))
+            .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        PendingIntent openPending = PendingIntent.getActivity(
+            this,
+            6,
+            openIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+
+        String safeSender = sender == null || sender.isBlank() ? "Nova mensagem" : sender;
+        String safeText = text == null ? "" : text;
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHAT_NOTIFICATION_CHANNEL)
+            .setSmallIcon(android.R.drawable.ic_dialog_email)
+            .setContentTitle(safeSender)
+            .setContentText(safeText)
+            .setStyle(new NotificationCompat.BigTextStyle().bigText(safeText))
+            .setAutoCancel(true)
+            .setContentIntent(openPending)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT);
+
+        manager.notify(2000 + Math.abs(roomCode == null ? 0 : roomCode.hashCode() % 1000), builder.build());
     }
 
     @Override

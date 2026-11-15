@@ -287,6 +287,33 @@ public class OndaMediaPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void requestNotificationPermission(PluginCall call) {
+        if (!(getActivity() instanceof MainActivity)) {
+            call.resolve(new JSObject().put("granted", false));
+            return;
+        }
+
+        MainActivity activity = (MainActivity) getActivity();
+        boolean granted = activity.requestChatNotificationPermission();
+        call.resolve(new JSObject().put("granted", granted));
+    }
+
+    @PluginMethod
+    public void notifyChat(PluginCall call) {
+        if (!(getActivity() instanceof MainActivity)) {
+            call.reject("Notificação indisponível.");
+            return;
+        }
+
+        String sender = call.getString("sender", "Nova mensagem");
+        String text = call.getString("text", "");
+        String roomCode = call.getString("roomId", "");
+        MainActivity activity = (MainActivity) getActivity();
+        activity.runOnUiThread(() -> activity.showChatNotification(sender, text, roomCode));
+        call.resolve();
+    }
+
+    @PluginMethod
     public void setCameraQuality(PluginCall call) {
         int width = call.getInt("width", 1280);
         int height = call.getInt("height", 720);
