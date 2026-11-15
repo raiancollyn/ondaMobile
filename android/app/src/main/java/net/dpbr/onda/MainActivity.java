@@ -77,6 +77,7 @@ public class MainActivity extends BridgeActivity {
     private int appliedTopInset = -1;
     private int appliedBottomInset = -1;
     private TextureViewRenderer cameraPreview;
+    private UpdateManager updateManager;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -87,6 +88,9 @@ public class MainActivity extends BridgeActivity {
         installSystemBarScrims();
         installWindowInsetsListener();
         getWindow().getDecorView().post(this::applySafeAreaInsets);
+
+        updateManager = new UpdateManager(this);
+        updateManager.checkForUpdates(false);
 
         boolean debuggable = (getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0;
         if (debuggable && getIntent().getBooleanExtra("onda_test_camera", false)) {
@@ -407,12 +411,26 @@ public class MainActivity extends BridgeActivity {
     public void onResume() {
         super.onResume();
 
+        if (updateManager != null) {
+            updateManager.onResume();
+        }
+
         long backgroundFor = lastPausedAt > 0
             ? SystemClock.elapsedRealtime() - lastPausedAt
             : 0;
         if (backgroundFor > 1500 && CallService.isCallActive()) {
             getWindow().getDecorView().postDelayed(CallService::reassertCamera, 1500);
         }
+    }
+
+    @Override
+    public void onDestroy() {
+        if (updateManager != null) {
+            updateManager.destroy();
+            updateManager = null;
+        }
+
+        super.onDestroy();
     }
 
     @Override

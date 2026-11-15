@@ -143,3 +143,28 @@ git push origin v0.1.0
 O APK publicado é **debug-signed**, adequado para testes e instalação via APK.
 Para a Play Store será necessário configurar um keystore de release nos secrets
 do GitHub e um build `assembleRelease` assinado.
+## Atualizações no aplicativo
+
+O app verifica a release mais recente do repositório `raiancollyn/ondaMobile`
+na inicialização, no máximo uma vez a cada 6 horas. Se houver uma versão mais
+nova:
+
+1. mostra um diálogo com a versão disponível;
+2. baixa o APK pelo `DownloadManager`;
+3. abre o instalador do Android quando o download termina;
+4. se a permissão de instalar apps desconhecidos estiver desligada, abre as
+   configurações do Android para o usuário liberar.
+
+O botão **Depois** ignora aquela versão até surgir uma release mais nova.
+
+### Assinatura dos APKs debug
+
+Os APKs debug usam o keystore fixo `android/app/onda-debug.keystore`, com
+credenciais de desenvolvimento. Isso é necessário para que uma atualização
+possa ser instalada por cima da versão anterior; sem um keystore fixo, cada
+build do GitHub Actions usaria uma chave diferente e o Android recusaria a
+atualização.
+
+> Quem instalou uma versão anterior à v0.2.8, assinada com outra chave debug,
+> precisa desinstalar uma vez e instalar a v0.2.8. Depois disso, as próximas
+> atualizações assinadas com `onda-debug.keystore` instalam normalmente.
