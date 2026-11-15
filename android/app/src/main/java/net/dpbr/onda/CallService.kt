@@ -51,6 +51,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import livekit.org.webrtc.CameraXHelper
+import livekit.org.webrtc.RtpParameters
 import livekit.org.webrtc.getCameraX
 import java.net.HttpURLConnection
 import java.net.URL
@@ -778,14 +779,16 @@ class CallService : LifecycleService() {
         )
         target.screenShareTrackPublishDefaults = VideoTrackPublishDefaults(
             videoEncoding = VideoEncoding(bitrate * 1000, fps),
-            simulcast = false
+            simulcast = false,
+            degradationPreference = RtpParameters.DegradationPreference.MAINTAIN_FRAMERATE
         )
         target.localParticipant.screenShareTrackCaptureDefaults = LocalVideoTrackOptions(
             captureParams = VideoCaptureParameter(width, height, fps, false)
         )
         target.localParticipant.screenShareTrackPublishDefaults = VideoTrackPublishDefaults(
             videoEncoding = VideoEncoding(bitrate * 1000, fps),
-            simulcast = false
+            simulcast = false,
+            degradationPreference = RtpParameters.DegradationPreference.MAINTAIN_FRAMERATE
         )
         Log.i("OndaCall", "Screen quality: ${width}x${height}@${fps} ${bitrate}kbps")
     }
@@ -1107,7 +1110,7 @@ class CallService : LifecycleService() {
 
                 room?.let { applyScreenShareQuality(it) }
 
-                val screenNotification = buildNotification("Compartilhando a tela")
+                val screenNotification = buildScreenShareNotification()
                 val params = ScreenCaptureParams(
                     resultData,
                     SCREEN_NOTIFICATION_ID,
@@ -1856,6 +1859,33 @@ class CallService : LifecycleService() {
         channel.description = "Mantém a chamada de voz ativa em segundo plano."
         channel.setSound(null, null)
         getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+    }
+
+    private fun buildScreenShareNotification(): Notification {
+        val openIntent = Intent(this, MainActivity::class.java).apply {
+            action = Intent.ACTION_VIEW
+            roomId?.takeIf { it.isNotBlank() }?.let { code ->
+                data = Uri.parse("onda://sala/${Uri.encode(code)}")
+            }
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val openPending = PendingIntent.getActivity(
+            this,
+            5,
+            openIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_menu_camera)
+            .setContentTitle("Compartilhando a tela")
+            .setContentText("Toque para voltar à sala")
+            .setContentIntent(openPending)
+            .setOngoing(true)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setShowWhen(false)
+            .build()
     }
 
     private fun buildNotification(text: String): Notification {
