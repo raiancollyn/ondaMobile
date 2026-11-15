@@ -897,10 +897,8 @@ class CallService : LifecycleService() {
                 screenShareJob = null
                 Log.i("OndaCall", "Screen share stopped because the call reconnected.")
             }
-            newRoom.localParticipant.setMicrophoneEnabled(
-                microphoneEnabled && !microphoneSuppressedByFocus
-            )
             requestCallAudioFocus()
+            restoreMicrophoneAfterReconnect(newRoom)
             scheduleAudioRouteRefresh("call reconnected", 350)
             cameraPreviewInitialized = false
             if (cameraEnabled) {
@@ -926,6 +924,23 @@ class CallService : LifecycleService() {
         } finally {
             connecting = false
         }
+    }
+
+    private suspend fun restoreMicrophoneAfterReconnect(target: Room) {
+        if (!microphoneEnabled) {
+            microphoneSuppressedByFocus = false
+            target.localParticipant.setMicrophoneEnabled(false)
+            return
+        }
+
+        // A network change can leave the old audio track published but silent.
+        // Recreate it once, which is the same recovery as toggling the mic.
+        microphoneSuppressedByFocus = false
+        target.localParticipant.setMicrophoneEnabled(false)
+        delay(180)
+        target.localParticipant.setMicrophoneEnabled(true)
+        postMediaState()
+        Log.i("OndaCall", "Microphone republished after reconnect.")
     }
 
     override fun onDestroy() {
