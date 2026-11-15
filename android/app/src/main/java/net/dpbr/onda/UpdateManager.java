@@ -44,9 +44,7 @@ final class UpdateManager {
         "https://api.github.com/repos/raiancollyn/ondaMobile/releases/latest";
     private static final String APK_MIME = "application/vnd.android.package-archive";
     private static final String PREFS = "onda.updates";
-    private static final String KEY_LAST_CHECK = "last_check";
     private static final String KEY_SKIPPED = "skipped";
-    private static final long CHECK_INTERVAL_MS = 6L * 60L * 60L * 1000L;
 
     private final Activity activity;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -127,13 +125,6 @@ final class UpdateManager {
     }
 
     void checkForUpdates(boolean manual) {
-        long now = System.currentTimeMillis();
-        long lastCheck = preferences.getLong(KEY_LAST_CHECK, 0L);
-        if (!manual && lastCheck > 0 && now - lastCheck < CHECK_INTERVAL_MS) {
-            return;
-        }
-
-        preferences.edit().putLong(KEY_LAST_CHECK, now).apply();
         executor.execute(() -> {
             Release release = fetchLatestRelease();
             if (release == null) {

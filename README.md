@@ -146,7 +146,7 @@ do GitHub e um build `assembleRelease` assinado.
 ## Atualizações no aplicativo
 
 O app verifica a release mais recente do repositório `raiancollyn/ondaMobile`
-na inicialização, no máximo uma vez a cada 6 horas. Se houver uma versão mais
+a cada abertura do app. Se houver uma versão mais
 nova:
 
 1. mostra um diálogo com a versão disponível;
