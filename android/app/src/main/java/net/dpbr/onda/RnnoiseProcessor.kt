@@ -106,15 +106,27 @@ class RnnoiseProcessor : AudioProcessorInterface {
             // aparelhos. Se a voz entrou com energia e o RNNoise devolveu
             // praticamente nada, mantém o sinal original para não derrubar a
             // chamada.
+            var fallback = false
             if (inputPeak > 300 && outputPeak < maxOf(20, inputPeak / 20)) {
                 System.arraycopy(inputBuffer, 0, outputBuffer, 0, sampleCount)
+                fallback = true
+            }
+
+            // Mistura uma parte do sinal seco. Isso garante inteligibilidade
+            // mesmo quando o modelo atenua demais a voz, mantendo 70% do
+            // processamento neural.
+            for (index in 0 until sampleCount) {
+                val mixed = outputBuffer[index] * 0.7f + inputBuffer[index] * 0.3f
+                outputBuffer[index] = mixed.toInt()
+                    .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
+                    .toShort()
             }
 
             frameCount++
             if (frameCount == 1L || frameCount % 100L == 0L) {
                 Log.i(
                     TAG,
-                    "frames=$frameCount inPeak=$inputPeak outPeak=$outputPeak"
+                    "frames=$frameCount inPeak=$inputPeak outPeak=$outputPeak fallback=$fallback"
                 )
             }
 
