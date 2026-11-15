@@ -147,8 +147,15 @@ class CallService : LifecycleService() {
         fun isEchoCancellationEnabled(): Boolean = current?.echoCancellationEnabled ?: true
 
         @JvmStatic
-        fun setAudioProcessing(noiseSuppression: Boolean, echoCancellation: Boolean) {
-            current?.updateAudioProcessing(noiseSuppression, echoCancellation)
+        fun getAudioProcessingIntensity(): String = current?.audioProcessingIntensity ?: "standard"
+
+        @JvmStatic
+        fun setAudioProcessing(
+            noiseSuppression: Boolean,
+            echoCancellation: Boolean,
+            intensity: String
+        ) {
+            current?.updateAudioProcessing(noiseSuppression, echoCancellation, intensity)
         }
 
         @JvmStatic
@@ -232,6 +239,7 @@ class CallService : LifecycleService() {
     private var microphoneEnabled = true
     private var noiseSuppressionEnabled = true
     private var echoCancellationEnabled = true
+    private var audioProcessingIntensity = "standard"
     private var cameraEnabled = false
     private var screenShareEnabled = false
     private var screenShareJob: Job? = null
@@ -298,6 +306,7 @@ class CallService : LifecycleService() {
     private fun loadAudioPreferences() {
         noiseSuppressionEnabled = audioPreferences.getBoolean("noiseSuppression", true)
         echoCancellationEnabled = audioPreferences.getBoolean("echoCancellation", true)
+        audioProcessingIntensity = audioPreferences.getString("intensity", "standard") ?: "standard"
     }
 
     private fun loadCameraPreferences() {        val prefs = cameraPreferences
@@ -1238,25 +1247,37 @@ class CallService : LifecycleService() {
     }
 
     private fun applyAudioProcessing(target: Room) {
-        target.audioTrackCaptureDefaults = LocalAudioTrackOptions(
+        val aggressive = audioProcessingIntensity == "aggressive"
+        val options = LocalAudioTrackOptions(
             noiseSuppression = noiseSuppressionEnabled,
             echoCancellation = echoCancellationEnabled,
-            autoGainControl = true,
-            highPassFilter = true,
-            typingNoiseDetection = false
+            autoGainControl = !aggressive,
+            highPassFilter = audioProcessingIntensity != "soft",
+            typingNoiseDetection = aggressive
         )
+        target.audioTrackCaptureDefaults = options
+        target.localParticipant.audioTrackCaptureDefaults = options
         Log.i(
             "OndaCall",
-            "Audio processing: noise=$noiseSuppressionEnabled echo=$echoCancellationEnabled"
+            "Audio processing: noise=$noiseSuppressionEnabled echo=$echoCancellationEnabled intensity=$audioProcessingIntensity"
         )
     }
 
-    private fun updateAudioProcessing(noiseSuppression: Boolean, echoCancellation: Boolean) {
+    private fun updateAudioProcessing(
+        noiseSuppression: Boolean,
+        echoCancellation: Boolean,
+        intensity: String
+    ) {
         noiseSuppressionEnabled = noiseSuppression
         echoCancellationEnabled = echoCancellation
+        audioProcessingIntensity = when (intensity) {
+            "soft", "aggressive" -> intensity
+            else -> "standard"
+        }
         audioPreferences.edit()
             .putBoolean("noiseSuppression", noiseSuppression)
             .putBoolean("echoCancellation", echoCancellation)
+            .putString("intensity", audioProcessingIntensity)
             .apply()
 
         room?.let { applyAudioProcessing(it) }
