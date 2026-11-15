@@ -33,6 +33,7 @@ import io.livekit.android.renderer.TextureViewRenderer
 import io.livekit.android.room.Room
 import io.livekit.android.room.participant.VideoTrackPublishDefaults
 import io.livekit.android.room.track.CameraPosition
+import io.livekit.android.room.track.LocalAudioTrackOptions
 import io.livekit.android.room.track.LocalVideoTrack
 import io.livekit.android.room.track.LocalVideoTrackOptions
 import io.livekit.android.room.track.Track
@@ -140,6 +141,17 @@ class CallService : LifecycleService() {
         fun isMicrophoneEnabled(): Boolean = current?.microphoneEnabled ?: false
 
         @JvmStatic
+        fun isNoiseSuppressionEnabled(): Boolean = current?.noiseSuppressionEnabled ?: true
+
+        @JvmStatic
+        fun isEchoCancellationEnabled(): Boolean = current?.echoCancellationEnabled ?: true
+
+        @JvmStatic
+        fun setAudioProcessing(noiseSuppression: Boolean, echoCancellation: Boolean) {
+            current?.updateAudioProcessing(noiseSuppression, echoCancellation)
+        }
+
+        @JvmStatic
         fun setCamera(enabled: Boolean) {
             current?.setCameraEnabled(enabled)
         }
@@ -218,6 +230,8 @@ class CallService : LifecycleService() {
     private var liveKitUrl: String? = null
     private var liveKitToken: String? = null
     private var microphoneEnabled = true
+    private var noiseSuppressionEnabled = true
+    private var echoCancellationEnabled = true
     private var cameraEnabled = false
     private var screenShareEnabled = false
     private var screenShareJob: Job? = null
@@ -241,6 +255,9 @@ class CallService : LifecycleService() {
     private var screenBitrateKbps = 4000
     private val cameraPreferences by lazy {
         getSharedPreferences("onda_camera", MODE_PRIVATE)
+    }
+    private val audioPreferences by lazy {
+        getSharedPreferences("onda_audio", MODE_PRIVATE)
     }
     private var cameraPreview: TextureViewRenderer? = null
     private var cameraPreviewInitialized = false
@@ -269,6 +286,7 @@ class CallService : LifecycleService() {
         super.onCreate()
         current = this
         loadCameraPreferences()
+        loadAudioPreferences()
         setupCameraX()
         registerAudioCallbacks()
         registerCameraAvailabilityCallback()
@@ -277,8 +295,12 @@ class CallService : LifecycleService() {
         createNotificationChannel()
     }
 
-    private fun loadCameraPreferences() {
-        val prefs = cameraPreferences
+    private fun loadAudioPreferences() {
+        noiseSuppressionEnabled = audioPreferences.getBoolean("noiseSuppression", true)
+        echoCancellationEnabled = audioPreferences.getBoolean("echoCancellation", true)
+    }
+
+    private fun loadCameraPreferences() {        val prefs = cameraPreferences
         cameraPosition = if (prefs.getString("position", "front") == "back") {
             CameraPosition.BACK
         } else {
@@ -808,6 +830,7 @@ class CallService : LifecycleService() {
                 val liveKitRoom = LiveKit.create(applicationContext)
                 room = liveKitRoom
                 applyCameraQuality(liveKitRoom)
+                applyAudioProcessing(liveKitRoom)
                 liveKitRoom.connect(url, token)
                 liveKitRoom.localParticipant.setMicrophoneEnabled(
                     microphoneEnabled && !microphoneSuppressedByFocus
@@ -885,6 +908,7 @@ class CallService : LifecycleService() {
             val newRoom = LiveKit.create(applicationContext)
             room = newRoom
             applyCameraQuality(newRoom)
+            applyAudioProcessing(newRoom)
             newRoom.connect(url, token)
             if (screenShareEnabled) {
                 // A new Room needs a new screencast track. The MediaProjection
@@ -1211,6 +1235,44 @@ class CallService : LifecycleService() {
         postMediaState()
         updateNotification()
         Log.i("OndaCall", "Screen share stopped.")
+    }
+
+    private fun applyAudioProcessing(target: Room) {
+        target.audioTrackCaptureDefaults = LocalAudioTrackOptions(
+            noiseSuppression = noiseSuppressionEnabled,
+            echoCancellation = echoCancellationEnabled,
+            autoGainControl = true,
+            highPassFilter = true,
+            typingNoiseDetection = false
+        )
+        Log.i(
+            "OndaCall",
+            "Audio processing: noise=$noiseSuppressionEnabled echo=$echoCancellationEnabled"
+        )
+    }
+
+    private fun updateAudioProcessing(noiseSuppression: Boolean, echoCancellation: Boolean) {
+        noiseSuppressionEnabled = noiseSuppression
+        echoCancellationEnabled = echoCancellation
+        audioPreferences.edit()
+            .putBoolean("noiseSuppression", noiseSuppression)
+            .putBoolean("echoCancellation", echoCancellation)
+            .apply()
+
+        room?.let { applyAudioProcessing(it) }
+        if (room != null && microphoneEnabled) {
+            scope.launch {
+                try {
+                    room?.localParticipant?.setMicrophoneEnabled(false)
+                    delay(180)
+                    room?.localParticipant?.setMicrophoneEnabled(true)
+                    postMediaState()
+                    Log.i("OndaCall", "Microphone republished with new audio processing.")
+                } catch (error: Exception) {
+                    Log.w("OndaCall", "Could not apply audio processing.", error)
+                }
+            }
+        }
     }
 
     private fun setCameraEnabled(enabled: Boolean) {

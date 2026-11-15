@@ -270,6 +270,23 @@ public class OndaMediaPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void getAudioProcessing(PluginCall call) {
+        call.resolve(new JSObject()
+            .put("noiseSuppression", CallService.isNoiseSuppressionEnabled())
+            .put("echoCancellation", CallService.isEchoCancellationEnabled()));
+    }
+
+    @PluginMethod
+    public void setAudioProcessing(PluginCall call) {
+        boolean noiseSuppression = Boolean.TRUE.equals(call.getBoolean("noiseSuppression", true));
+        boolean echoCancellation = Boolean.TRUE.equals(call.getBoolean("echoCancellation", true));
+        CallService.setAudioProcessing(noiseSuppression, echoCancellation);
+        call.resolve(new JSObject()
+            .put("noiseSuppression", noiseSuppression)
+            .put("echoCancellation", echoCancellation));
+    }
+
+    @PluginMethod
     public void setCameraQuality(PluginCall call) {
         int width = call.getInt("width", 1280);
         int height = call.getInt("height", 720);
