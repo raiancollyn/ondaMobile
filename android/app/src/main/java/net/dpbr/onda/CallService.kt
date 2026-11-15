@@ -222,7 +222,7 @@ class CallService : LifecycleService() {
     private var screenShareEnabled = false
     private var screenShareJob: Job? = null
     private var screenShareResultData: Intent? = null
-    private var screenShareResultCode = 0
+    private var screenShareTrack: LocalVideoTrack? = null
     private var localVideoTrack: LocalVideoTrack? = null
     private var cameraPosition = CameraPosition.FRONT
     private var activeCameraId: String? = null
@@ -892,6 +892,7 @@ class CallService : LifecycleService() {
                 // end the screen session and let the user start it again.
                 screenShareEnabled = false
                 screenShareResultData = null
+                screenShareTrack = null
                 screenShareJob?.cancel()
                 screenShareJob = null
                 Log.i("OndaCall", "Screen share stopped because the call reconnected.")
@@ -1093,7 +1094,6 @@ class CallService : LifecycleService() {
         }
 
         screenShareResultData = resultData
-        screenShareResultCode = resultCode
         screenShareJob?.cancel()
         screenShareJob = scope.launch {
             try {
@@ -1121,6 +1121,12 @@ class CallService : LifecycleService() {
 
                 val started = participant.setScreenShareEnabled(true, params)
                 screenShareEnabled = started
+                screenShareTrack = if (started) {
+                    participant.getTrackPublication(Track.Source.SCREEN_SHARE)
+                        ?.track as? LocalVideoTrack
+                } else {
+                    null
+                }
                 if (!started) {
                     screenShareResultData = null
                 }
@@ -1130,6 +1136,7 @@ class CallService : LifecycleService() {
             } catch (error: Exception) {
                 screenShareEnabled = false
                 screenShareResultData = null
+                screenShareTrack = null
                 Log.e("OndaCall", "Could not start screen sharing.", error)
                 postMediaState()
                 updateNotification()
@@ -1145,28 +1152,23 @@ class CallService : LifecycleService() {
         room?.let { applyScreenShareQuality(it) }
 
         if (screenShareEnabled) {
-            restartScreenShareForQuality()
-        }
-    }
-
-    private fun restartScreenShareForQuality() {
-        val resultData = screenShareResultData ?: return
-        val resultCode = screenShareResultCode
-        screenShareJob?.cancel()
-        screenShareJob = scope.launch {
-            try {
-                room?.localParticipant?.setScreenShareEnabled(false)
-            } catch (error: Exception) {
-                Log.w("OndaCall", "Could not restart screen capture.", error)
+            val track = screenShareTrack ?: room?.localParticipant
+                ?.getTrackPublication(Track.Source.SCREEN_SHARE)
+                ?.track as? LocalVideoTrack
+            screenShareTrack = track
+            if (track != null) {
+                try {
+                    track.capturer.changeCaptureFormat(width, height, frameRate)
+                    Log.i("OndaCall", "Screen capture format updated live: ${width}x${height}@$frameRate")
+                } catch (error: Exception) {
+                    Log.w("OndaCall", "Could not update screen capture format live.", error)
+                }
             }
-            delay(250)
-            screenShareEnabled = false
-            screenShareJob = null
-            startScreenShare(resultCode, resultData)
         }
     }
 
-    private fun stopScreenShare() {        if (!screenShareEnabled) {
+    private fun stopScreenShare() {
+        if (!screenShareEnabled) {
             screenShareResultData = null
             return
         }
@@ -1190,6 +1192,7 @@ class CallService : LifecycleService() {
 
         screenShareEnabled = false
         screenShareResultData = null
+        screenShareTrack = null
         postMediaState()
         updateNotification()
         Log.i("OndaCall", "Screen share stopped.")
