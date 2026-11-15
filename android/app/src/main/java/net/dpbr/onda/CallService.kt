@@ -228,6 +228,7 @@ class CallService : LifecycleService() {
     private var liveKitToken: String? = null
     private var microphoneEnabled = true
     private var rnnoiseEnabled = true
+    private val rnnoiseProcessor = RnnoiseProcessor()
     private var cameraEnabled = false
     private var screenShareEnabled = false
     private var screenShareJob: Job? = null
@@ -293,6 +294,7 @@ class CallService : LifecycleService() {
 
     private fun loadAudioPreferences() {
         rnnoiseEnabled = audioPreferences.getBoolean("rnnoise", true)
+        rnnoiseProcessor.setEnabled(rnnoiseEnabled)
     }
 
     private fun loadCameraPreferences() {        val prefs = cameraPreferences
@@ -967,6 +969,7 @@ class CallService : LifecycleService() {
         unregisterAudioCallbacks()
         abandonCallAudioFocus()
         unregisterCameraAvailabilityCallback()
+        rnnoiseProcessor.close()
         try {
             stopForeground(STOP_FOREGROUND_REMOVE)
         } catch (error: Exception) {
@@ -1229,7 +1232,8 @@ class CallService : LifecycleService() {
 
     private fun applyAudioProcessing(target: Room) {
         val options = LocalAudioTrackOptions(
-            noiseSuppression = rnnoiseEnabled,
+            // RNNoise substitui a supressão nativa; AEC continua no WebRTC.
+            noiseSuppression = false,
             echoCancellation = true,
             autoGainControl = true,
             highPassFilter = true,
@@ -1237,30 +1241,17 @@ class CallService : LifecycleService() {
         )
         target.audioTrackCaptureDefaults = options
         target.localParticipant.audioTrackCaptureDefaults = options
-        Log.i(
-            "OndaCall",
-            "Audio processing: WebRTC noiseSuppression=$rnnoiseEnabled echo=true"
-        )
+        target.audioProcessingController.setCapturePostProcessing(rnnoiseProcessor)
+        target.audioProcessingController.setBypassForCapturePostProcessing(!rnnoiseEnabled)
+        rnnoiseProcessor.setEnabled(rnnoiseEnabled)
+        Log.i("OndaCall", "Audio processing: RNNoise=$rnnoiseEnabled echo=true")
     }
 
     private fun updateRnnoise(enabled: Boolean) {
         rnnoiseEnabled = enabled
+        rnnoiseProcessor.setEnabled(enabled)
         audioPreferences.edit().putBoolean("rnnoise", enabled).apply()
-
-        room?.let { applyAudioProcessing(it) }
-        if (room != null && microphoneEnabled) {
-            scope.launch {
-                try {
-                    room?.localParticipant?.setMicrophoneEnabled(false)
-                    delay(180)
-                    room?.localParticipant?.setMicrophoneEnabled(true)
-                    postMediaState()
-                    Log.i("OndaCall", "Microphone republished with new noise suppression.")
-                } catch (error: Exception) {
-                    Log.w("OndaCall", "Could not apply noise suppression.", error)
-                }
-            }
-        }
+        room?.audioProcessingController?.setBypassForCapturePostProcessing(!enabled)
     }
 
     private fun setCameraEnabled(enabled: Boolean) {
