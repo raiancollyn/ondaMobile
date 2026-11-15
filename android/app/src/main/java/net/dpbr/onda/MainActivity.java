@@ -33,11 +33,20 @@ import androidx.core.view.WindowInsetsControllerCompat;
 import com.getcapacitor.BridgeActivity;
 import io.livekit.android.renderer.TextureViewRenderer;
 import livekit.org.webrtc.RendererCommon;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class MainActivity extends BridgeActivity {
     private static final int CALL_PERMISSIONS_REQUEST = 42;
     private static final int SCREEN_SHARE_REQUEST = 43;
     private static final int CHAT_NOTIFICATION_PERMISSION_REQUEST = 44;
+    private static final String CHAT_NOTIFICATION_GROUP = "onda_chat";
+    private static final int CHAT_NOTIFICATION_SUMMARY_ID = 1999;
+    private final Set<Integer> activeChatNotificationIds =
+        Collections.synchronizedSet(new HashSet<>());
+    private final AtomicInteger chatNotificationCounter = new AtomicInteger(2000);
     private static final String CHAT_NOTIFICATION_CHANNEL = "onda_messages";
     private static final int DARK_SCRIM = Color.rgb(12, 25, 22);
     private static final int LIGHT_SCRIM = Color.rgb(247, 243, 235);
@@ -262,6 +271,13 @@ public class MainActivity extends BridgeActivity {
 
         String safeSender = sender == null || sender.isBlank() ? "Nova mensagem" : sender;
         String safeText = text == null ? "" : text;
+        int notificationId = chatNotificationCounter.getAndIncrement();
+        if (notificationId > 100_000) {
+            chatNotificationCounter.set(2000);
+            notificationId = 2000;
+        }
+        activeChatNotificationIds.add(notificationId);
+
         NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHAT_NOTIFICATION_CHANNEL)
             .setSmallIcon(android.R.drawable.ic_dialog_email)
             .setContentTitle(safeSender)
@@ -269,9 +285,47 @@ public class MainActivity extends BridgeActivity {
             .setStyle(new NotificationCompat.BigTextStyle().bigText(safeText))
             .setAutoCancel(true)
             .setContentIntent(openPending)
+            .setGroup(CHAT_NOTIFICATION_GROUP)
+            .setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_CHILDREN)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setWhen(System.currentTimeMillis())
+            .setShowWhen(true)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT);
 
-        manager.notify(2000 + Math.abs(roomCode == null ? 0 : roomCode.hashCode() % 1000), builder.build());
+        manager.notify(notificationId, builder.build());
+
+        int count = activeChatNotificationIds.size();
+        String summaryText = count == 1 ? "1 nova mensagem" : count + " novas mensagens";
+        NotificationCompat.Builder summary = new NotificationCompat.Builder(this, CHAT_NOTIFICATION_CHANNEL)
+            .setSmallIcon(android.R.drawable.ic_dialog_email)
+            .setContentTitle("Onda")
+            .setContentText(summaryText)
+            .setStyle(new NotificationCompat.BigTextStyle().bigText(summaryText))
+            .setAutoCancel(true)
+            .setOnlyAlertOnce(true)
+            .setContentIntent(openPending)
+            .setGroup(CHAT_NOTIFICATION_GROUP)
+            .setGroupSummary(true)
+            .setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_CHILDREN)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setNumber(count)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT);
+        manager.notify(CHAT_NOTIFICATION_SUMMARY_ID, summary.build());
+    }
+
+    public void clearChatNotifications() {
+        NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        if (manager == null) {
+            return;
+        }
+
+        synchronized (activeChatNotificationIds) {
+            for (int id : activeChatNotificationIds) {
+                manager.cancel(id);
+            }
+            activeChatNotificationIds.clear();
+        }
+        manager.cancel(CHAT_NOTIFICATION_SUMMARY_ID);
     }
 
     @Override
@@ -442,6 +496,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onStart() {
         super.onStart();
+        clearChatNotifications();
 
         loadPendingDeepLink();
         CallService.validateCurrentRoom();
